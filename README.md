@@ -1,8 +1,20 @@
 # EzSwitch
 
-A macOS menu bar utility for keyboard layout switching and text transformation.
+<p align="center">
+  <img src="icon.png" alt="EzSwitch Icon" width="128" height="128">
+</p>
 
-Inspired by Caramba Switcher and Karabiner-Elements
+<p align="center">
+  <strong>A macOS menu bar utility for keyboard layout switching and text transformation</strong>
+</p>
+
+<p align="center">
+  Inspired by Caramba Switcher and Karabiner-Elements
+</p>
+
+<p align="center">
+  <img src="screenshots/screenshot.png" alt="EzSwitch Screenshot" width="400">
+</p>
 
 ## Features
 
@@ -47,13 +59,7 @@ To grant permissions:
 
 ## Installation
 
-### Option 1: Download DMG
-1. Download the latest release from the [Releases](https://github.com/alexrel/EzSwitch/releases) page
-2. Open the DMG file
-3. Drag EzSwitch to your Applications folder
-4. Launch EzSwitch from Applicationsyt dct cnhjrb gthtdtk yf 
-
-### Option 2: Build from Source
+### Build from Source
 1. Clone the repository:
    ```bash
    git clone https://github.com/alexrel/EzSwitch.git

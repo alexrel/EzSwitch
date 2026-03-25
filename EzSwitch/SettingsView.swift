@@ -57,12 +57,12 @@ struct SettingsView: View {
                                 .background(Color.blue.opacity(0.1))
                                 .cornerRadius(8)
                         }
-                        
+
                         // Title
                         Text(String(localized: "EzSwitch Settings"))
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
-                        
+
                         Spacer()
                     }
                     .padding(.top, 16)
@@ -75,7 +75,7 @@ struct SettingsView: View {
                                 Text(String(localized: "Universal Access permission is required"))
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                
+
                                 Button(action: {
                                     PermissionsManager.shared.openSecurityPreferences()
                                 }) {
@@ -104,7 +104,7 @@ struct SettingsView: View {
                     SettingsCard(icon: "command", title: String(localized: "Command Switch"), color: .blue) {
                         Toggle(String(localized: "Enable"), isOn: $settings.commandSwitchEnabled)
                             .toggleStyle(CustomToggleStyle())
-                        
+
                         if settings.commandSwitchEnabled {
                             VStack(spacing: 12) {
                                 LanguagePickerRow(
@@ -114,7 +114,7 @@ struct SettingsView: View {
                                     options: languagesForPicker,
                                     noneOption: noneOption
                                 )
-                                
+
                                 LanguagePickerRow(
                                     icon: "arrow.right",
                                     title: String(localized: "Right Command"),
@@ -132,19 +132,19 @@ struct SettingsView: View {
                     SettingsCard(icon: "textformat", title: String(localized: "Text Transformation"), color: .purple) {
                         Toggle(String(localized: "Enable"), isOn: $settings.enableTransformKey)
                             .toggleStyle(CustomToggleStyle())
-                        
+
                         if settings.enableTransformKey {
                             VStack(spacing: 12) {
                                 HStack {
                                     Image(systemName: "key")
                                         .foregroundColor(.purple)
                                         .frame(width: 24)
-                                    
+
                                     Text(String(localized: "Key"))
                                         .font(.subheadline)
-                                    
+
                                     Spacer()
-                                    
+
                                     Picker("", selection: $settings.transformKeyType) {
                                         ForEach(TransformKeyType.allCases, id: \.self) { keyType in
                                             Text(keyType.displayName).tag(keyType)
@@ -154,10 +154,10 @@ struct SettingsView: View {
                                     .labelsHidden()
                                     .focusable(false)
                                 }
-                                
+
                                 Toggle(String(localized: "Suppress in applications"), isOn: $settings.suppressTransformKey)
                                     .toggleStyle(CustomToggleStyle())
-                                
+
                                 if settings.suppressTransformKey {
                                     HStack {
                                         Image(systemName: "info.circle")
@@ -168,7 +168,7 @@ struct SettingsView: View {
                                     }
                                     .padding(.leading, 8)
                                 }
-                                
+
                                 Toggle(String(localized: "Switch layout after"), isOn: $settings.switchLayoutAfterTransform)
                                     .toggleStyle(CustomToggleStyle())
                             }
@@ -205,7 +205,7 @@ struct SettingsView: View {
                                         )
                                     }
                                 }
-                                
+
                                 if settings.enableTransformKey {
                                     AssignmentRow(
                                         icon: settings.transformKeyType.isShift ? "⇧" : "⌥",
@@ -233,6 +233,7 @@ struct SettingsView: View {
                             .cornerRadius(10)
                         }
                         .buttonStyle(.plain)
+                        .focusable(false)
 
                         Spacer()
 
@@ -255,6 +256,7 @@ struct SettingsView: View {
                             .cornerRadius(10)
                         }
                         .buttonStyle(.plain)
+                        .focusable(false)
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 16)
@@ -333,19 +335,19 @@ struct SettingsCard<Content: View>: View {
     let title: String
     let color: Color
     @ViewBuilder let content: () -> Content
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: icon)
                     .foregroundColor(color)
                     .font(.system(size: 18, weight: .semibold))
-                
+
                 Text(title)
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundColor(.primary)
             }
-            
+
             content()
         }
         .padding(16)
@@ -364,18 +366,18 @@ struct LanguagePickerRow: View {
     @Binding var selection: String
     let options: [String]
     let noneOption: String
-    
+
     var body: some View {
         HStack {
             Image(systemName: icon)
                 .foregroundColor(.blue)
                 .frame(width: 24)
-            
+
             Text(title)
                 .font(.subheadline)
-            
+
             Spacer()
-            
+
             Picker("", selection: $selection) {
                 ForEach(options, id: \.self) { language in
                     Text(language == noneOption ? "—" : language)
@@ -394,7 +396,7 @@ struct AssignmentRow: View {
     let iconColor: Color
     let left: String
     let right: String
-    
+
     var body: some View {
         HStack {
             Text(icon)
@@ -403,13 +405,13 @@ struct AssignmentRow: View {
                 .frame(width: 24, height: 24)
                 .background(iconColor.opacity(0.1))
                 .cornerRadius(6)
-            
+
             Text(left)
                 .font(.subheadline)
                 .foregroundColor(.primary)
-            
+
             Spacer()
-            
+
             Text(right)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -422,14 +424,14 @@ struct CustomToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack {
             configuration.label
-            
+
             Spacer()
-            
+
             ZStack {
                 Capsule()
                     .fill(configuration.isOn ? Color.green : Color.gray.opacity(0.3))
                     .frame(width: 40, height: 22)
-                
+
                 Circle()
                     .fill(Color.white)
                     .frame(width: 18, height: 18)
