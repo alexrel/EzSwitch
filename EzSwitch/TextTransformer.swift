@@ -6,86 +6,91 @@ final class TextTransformer {
     static let shared = TextTransformer()
 
     // MARK: - Dynamic Mapper System
-    
-    /// Layout pair identifier
-    private struct LayoutPair: Hashable {
-        let from: String
-        let to: String
+
+    /// Registry of all available mappers (computed from MapperStore).
+    /// Values are multi-character strings so a single source key can
+    /// expand into a sequence (e.g. `й` → `"QQ"`).
+    private var mappers: [LayoutPair: [Character: String]] = [:]
+
+    /// Ensure mappers are loaded from MapperStore.
+    ///
+    /// Only the preset the user has *selected* for the current `left|right`
+    /// pair is used. The reverse direction is built on the fly by
+    /// `reverseTransform(_:forward:)` from the inverse of the selected
+    /// mapping — so the user only needs to configure one preset per
+    /// language pair and the other direction is automatically its mirror
+    /// image.
+    private func ensureMappersLoaded() {
+        var fresh: [LayoutPair: [Character: String]] = [:]
+        let store = MapperStore.shared
+        let settings = SettingsManager.shared
+
+        let left = settings.leftCommandLanguage
+        let right = settings.rightCommandLanguage
+        guard left != "None", right != "None" else {
+            self.mappers = fresh
+            return
+        }
+
+        let presets = store.presets(for: LayoutPair(from: left, to: right))
+        guard !presets.isEmpty else {
+            self.mappers = fresh
+            return
+        }
+
+        let key = Constants.WordSub.pairKey(from: left, to: right)
+        let active = settings.selectedPresetIds[key]
+            .flatMap { id in presets.first(where: { $0.id == id }) }
+            ?? presets.first
+
+        if let active = active {
+            fresh[LayoutPair(from: left, to: right)] = active.characterMapping()
+        }
+
+        self.mappers = fresh
     }
-    
-    /// Registry of all available mappers
-    private var mappers: [LayoutPair: [Character: Character]] = [:]
-    
-    /// All available mapper instances
-    private var mapperInstances: [LayoutMapper] = []
-    
-    /// Initialize mappers on first use
-    private lazy var initializedMappers: Void = {
-        initializeMappers()
-    }()
-    
-    // MARK: - Mapper Initialization
-    
-    /// Initialize all available mappers from files
-    private func initializeMappers() {
-        // Register built-in mappers (only forward direction)
-        mapperInstances = [
-            RussianToEnglishMapper()
-        ]
-        
-        // Build mappers dictionary from instances
-        for mapper in mapperInstances {
-            let pair = LayoutPair(from: mapper.fromLayout, to: mapper.toLayout)
-            mappers[pair] = mapper.mapping
-            
-            // Automatically create reverse mapping
-            let reversePair = LayoutPair(from: mapper.toLayout, to: mapper.fromLayout)
-            var reverseMapping: [Character: Character] = [:]
-            for (key, value) in mapper.mapping {
-                reverseMapping[value] = key
+
+    /// Get mapper for a specific layout pair.
+    /// If no direct mapping is found, automatically inverts the opposite pair
+    /// (e.g. if `A→B` exists, `B→A` is built on the fly). This means a user
+    /// only needs to store one preset per language pair.
+    ///
+    /// Note: the returned dict is only suitable for the *forward* direction
+    /// (`from → to`). The reverse direction uses `reverseTransform(_:forward:)`
+    /// which handles multi-character values via longest-match.
+    private func getMapper(from: String, to: String) -> [Character: String]? {
+        ensureMappersLoaded()
+        if let direct = mappers[LayoutPair(from: from, to: to)] {
+            return direct
+        }
+        // Build a degenerate single-character reverse for quick lookup
+        // (we don't use it for actual transformation — see `applyReverse`).
+        if let opposite = mappers[LayoutPair(from: to, to: from)] {
+            var reversed: [Character: String] = [:]
+            for (k, v) in opposite {
+                if let firstV = v.first {
+                    reversed[firstV] = String(k)
+                }
             }
-            mappers[reversePair] = reverseMapping
+            return reversed
         }
-        
-        print("🔤 [Mappers] Loaded \(mappers.count) mapper(s):")
-        for (pair, _) in mappers {
-            print("   • \(pair.from) → \(pair.to)")
-        }
+        return nil
     }
-    
-    /// Get mapper for a specific layout pair
-    private func getMapper(from: String, to: String) -> [Character: Character]? {
-        _ = initializedMappers  // Ensure mappers are initialized
-        return mappers[LayoutPair(from: from, to: to)]
-    }
-    
-    /// Check if mapper exists for a layout pair
-    func hasMapper(from: String, to: String) -> Bool {
-        return getMapper(from: from, to: to) != nil
-    }
-    
+
     /// Get all available layout pairs
     func availablePairs() -> [(from: String, to: String)] {
-        _ = initializedMappers
+        ensureMappersLoaded()
         return mappers.keys.map { ($0.from, $0.to) }
-    }
-    
-    /// Add a custom mapper at runtime
-    func addMapper(_ mapper: LayoutMapper) {
-        mapperInstances.append(mapper)
-        let pair = LayoutPair(from: mapper.fromLayout, to: mapper.toLayout)
-        mappers[pair] = mapper.mapping
-        print("🔤 [Mappers] Added custom mapper: \(mapper.fromLayout) → \(mapper.toLayout)")
     }
 
     // MARK: - Timings (tuned for reliability)
 
     private let copyTimeoutMs: Int = 350
     private let copyPollStepUs: useconds_t = 3_000
-    private let keyDownUpDelayUs: useconds_t = 2_000      // delay between key down and up
-    private let keySequenceDelayUs: useconds_t = 15_000   // delay between key sequences
-    private let pasteSettleUs: useconds_t = 20_000        // wait after paste
-    private let restoreDelay: TimeInterval = 0.12
+    private let keyDownUpDelayUs: useconds_t = Constants.Timing.keyDownUpDelayUs
+    private let keySequenceDelayUs: useconds_t = Constants.Timing.keySequenceDelayUs
+    private let pasteSettleUs: useconds_t = Constants.Timing.pasteSettleUs
+    private let restoreDelay: TimeInterval = Constants.Timing.clipboardRestoreDelay
 
     // MARK: - Public API
 
@@ -126,7 +131,7 @@ final class TextTransformer {
         let (marker, markerCount) = clipboard.setMarker()
 
         // Send Cmd+C with proper timing
-        simulateCmdKey(keyCode: 0x08) // C
+        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.c)) // C
         usleep(keySequenceDelayUs)
 
         // Wait for clipboard to change
@@ -151,7 +156,7 @@ final class TextTransformer {
 
         // Paste replaces selection automatically
         print("⌨️  [Branch A] Pasting transformed text")
-        simulateCmdKey(keyCode: 0x09) // Cmd+V
+        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
         usleep(pasteSettleUs)
 
         // Switch layout if enabled (based on text language, not keyboard)
@@ -199,7 +204,7 @@ final class TextTransformer {
 
         guard !parsed.word.isEmpty else {
             print("ℹ️  [Branch B] No word in selection")
-            sendKeyPress(keyCode: 0x7C) // Deselect
+            sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow)) // Deselect
             ClipboardManager.shared.restoreState(savedState)
             return
         }
@@ -211,7 +216,7 @@ final class TextTransformer {
             print("⌨️  [Branch B] Shrinking selection to exclude \(parsed.leadingSpaces.count) leading spaces")
             for _ in parsed.leadingSpaces {
                 sendShiftRight()
-                usleep(3_000)
+                usleep(Constants.Timing.betweenCharsDelayUs)
             }
             usleep(keySequenceDelayUs)
         }
@@ -227,7 +232,7 @@ final class TextTransformer {
         usleep(keySequenceDelayUs)
 
         print("⌨️  [Branch B] Pasting replacement")
-        simulateCmdKey(keyCode: 0x09) // Cmd+V
+        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
         usleep(pasteSettleUs)
 
         // Switch layout if enabled (based on text language)
@@ -285,7 +290,7 @@ final class TextTransformer {
         print("⌨️  [Branch B] Using Option+Shift+Left (macOS)")
 
         var fullSelection = ""
-        let maxIterations = 10 // Safety limit
+        let maxIterations = Constants.WordSelection.maxIterations // Safety limit
 
         for iteration in 0..<maxIterations {
             sendOptionShiftLeft()
@@ -294,7 +299,7 @@ final class TextTransformer {
             guard let selection = copyCurrentSelection() else {
                 if fullSelection.isEmpty {
                     print("⚠️  [Branch B] Option+Shift+Left failed - no selection")
-                    sendKeyPress(keyCode: 0x7C)
+                    sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow))
                     usleep(keySequenceDelayUs)
                     return nil
                 }
@@ -332,7 +337,7 @@ final class TextTransformer {
             return (fullSelection, "option")
         } else {
             print("⚠️  [Branch B] Option+Shift+Left failed - invalid selection")
-            sendKeyPress(keyCode: 0x7C)
+            sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow))
             usleep(keySequenceDelayUs)
             return nil
         }
@@ -349,7 +354,7 @@ final class TextTransformer {
             return (selection, "ctrl")
         } else {
             print("⚠️  [Branch B] Ctrl+Shift+Left failed")
-            sendKeyPress(keyCode: 0x7C) // Deselect
+            sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow)) // Deselect
             usleep(keySequenceDelayUs)
             return nil
         }
@@ -360,10 +365,10 @@ final class TextTransformer {
         let clipboard = ClipboardManager.shared
         let (marker, markerCount) = clipboard.setMarker()
 
-        simulateCmdKey(keyCode: 0x08) // Cmd+C
+        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.c)) // Cmd+C
         usleep(keySequenceDelayUs)
 
-        return clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: 200)
+        return clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: Int(Constants.Timing.captureSelectionTimeoutSec * 1000))
     }
 
     /// Checks if selection looks like a valid word (not whole line, no newlines)
@@ -373,7 +378,7 @@ final class TextTransformer {
             return false
         }
         // Invalid if too long (probably selected whole line)
-        if text.count > 50 {
+        if text.count > Constants.WordSelection.maxWordLength {
             return false
         }
         // Invalid if empty
@@ -420,7 +425,7 @@ final class TextTransformer {
     /// Sends Ctrl+Shift+Left Arrow (select word backward - works in IDEs)
     private func sendCtrlShiftLeft() {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let keyCode: CGKeyCode = 0x7B // Left Arrow
+        let keyCode: CGKeyCode = CGKeyCode(Constants.KeyCode.leftArrow)
 
         let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
         down?.flags = [.maskShift, .maskControl]
@@ -436,7 +441,7 @@ final class TextTransformer {
     /// Sends Option+Shift+Left Arrow (select word backward - macOS standard)
     private func sendOptionShiftLeft() {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let keyCode: CGKeyCode = 0x7B // Left Arrow
+        let keyCode: CGKeyCode = CGKeyCode(Constants.KeyCode.leftArrow)
 
         let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
         down?.flags = [.maskShift, .maskAlternate]
@@ -452,7 +457,7 @@ final class TextTransformer {
     /// Sends Shift+Right Arrow (shrink selection by one character)
     private func sendShiftRight() {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let keyCode: CGKeyCode = 0x7C // Right Arrow
+        let keyCode: CGKeyCode = CGKeyCode(Constants.KeyCode.rightArrow)
 
         let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
         down?.flags = [.maskShift]
@@ -474,7 +479,7 @@ final class TextTransformer {
         for char in text {
             if let scalar = char.unicodeScalars.first {
                 // Cyrillic: U+0400–U+04FF
-                if scalar.value >= 0x0400 && scalar.value <= 0x04FF {
+                if scalar.value >= Constants.Unicode.cyrillicLower && scalar.value <= Constants.Unicode.cyrillicUpper {
                     return true
                 }
             }
@@ -486,21 +491,110 @@ final class TextTransformer {
     private func doTransform(_ text: String, fromRussian: Bool) -> String {
         // Auto-detect based on text content, not keyboard layout
         let actuallyRussian = textIsRussian(text)
-        
+
         // Get source and target layouts from Command Switch settings
         let settings = SettingsManager.shared
-        let fromLayout = actuallyRussian ? settings.leftCommandLanguage : settings.rightCommandLanguage
-        let toLayout = actuallyRussian ? settings.rightCommandLanguage : settings.leftCommandLanguage
-        
-        // Check if mapper exists for this pair
-        guard let mapper = getMapper(from: fromLayout, to: toLayout) else {
-            print("⚠️ [Transform] No mapper found for \(fromLayout) → \(toLayout)")
+        let left = settings.leftCommandLanguage
+        let right = settings.rightCommandLanguage
+        let fromLayout = actuallyRussian ? left : right
+
+        ensureMappersLoaded()
+        let activeKey = LayoutPair(from: left, to: right)
+        let activeMap = mappers[activeKey]
+
+        // No active preset at all — nothing we can do
+        guard let activeMap = activeMap, !activeMap.isEmpty else {
+            print("⚠️ [Transform] No active mapper for \(left) → \(right)")
             print("🔤 [Transform] Available pairs: \(availablePairs().map { "\($0.from) → \($0.to)" })")
-            return text  // Return unchanged if no mapper
+            return text
         }
-        
-        print("🔤 [Transform] Using mapper: \(fromLayout) → \(toLayout)")
-        return String(text.map { mapper[$0] ?? $0 })
+
+        if fromLayout == left {
+            // Forward: source key in the active direction
+            print("🔤 [Transform] Forward: \(left) → \(right)")
+            return applyForward(text, mapper: activeMap)
+        } else {
+            // Reverse: invert the active mapping (longest-match handles
+            // multi-character forward values correctly)
+            print("🔤 [Transform] Reverse: \(right) → \(left)")
+            return applyReverse(text, forward: activeMap)
+        }
+    }
+
+    /// Apply a forward `[Character: String]` mapping character by character.
+    private func applyForward(_ text: String, mapper: [Character: String]) -> String {
+        var result = ""
+        result.reserveCapacity(text.count)
+        for char in text {
+            if let mapped = mapper[char] {
+                result.append(mapped)
+            } else {
+                result.append(char)
+            }
+        }
+        return result
+    }
+
+    /// Apply the inverse of a forward `[Character: String]` mapping.
+    ///
+    /// For each source key `k → v` in `forward`:
+    ///   - single-char `v` (e.g. `й → "j"`) goes into a char-level map
+    ///   - multi-char `v` (e.g. `ц → "tz"`, `я → "ja"`) goes into a
+    ///     pattern list
+    ///
+    /// Patterns are matched longest-first at every position. Single-char
+    /// fallbacks only apply to characters that are NOT the first character
+    /// of any multi-char pattern — this prevents `"j"` in `"ja"` from
+    /// hijacking the multi-char match.
+    ///
+    /// Collisions on the single-char level (e.g. both `е → "e"` and
+    /// `э → "e"` — two different source keys mapping to the same target
+    /// value) are inherently ambiguous and cannot be resolved by any
+    /// automatic inversion. The first such pair wins.
+    private func applyReverse(_ text: String, forward: [Character: String]) -> String {
+        var multiPatterns: [(String, String)] = []
+        var charMap: [Character: String] = [:]
+
+        for (k, v) in forward {
+            if v.count == 1 {
+                charMap[v.first!] = String(k)
+            } else {
+                multiPatterns.append((v, String(k)))
+            }
+        }
+        // Remove single-char mappings whose first char starts a multi-char
+        // pattern — the multi-char match always wins.
+        let multiStarts: Set<Character> = Set(multiPatterns.map { $0.0.first! })
+        for c in multiStarts {
+            charMap.removeValue(forKey: c)
+        }
+        // Longest pattern first, so `"ja"` is tried before `"j"`.
+        multiPatterns.sort { $0.0.count > $1.0.count }
+
+        var result = ""
+        var i = text.startIndex
+        let end = text.endIndex
+        while i < end {
+            var matched = false
+            for (pattern, replacement) in multiPatterns {
+                let endIdx = text.index(i, offsetBy: pattern.count, limitedBy: end) ?? end
+                if text[i..<endIdx] == pattern {
+                    result.append(replacement)
+                    i = endIdx
+                    matched = true
+                    break
+                }
+            }
+            if matched { continue }
+            let char = text[i]
+            if let mapped = charMap[char] {
+                result.append(mapped)
+            } else {
+                result.append(char)
+            }
+            i = text.index(after: i)
+        }
+        return result
     }
 
     // MARK: - Keyboard Helpers
@@ -538,14 +632,14 @@ final class TextTransformer {
     }
 
     // MARK: - Layout Detection & Switching
-    
+
     private func currentLayoutIsRussian() -> Bool {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return false }
         guard let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return false }
         let id = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
         return id.lowercased().contains("russian")
     }
-    
+
     /// Returns target layout name based on text language (what the text WAS before transform)
     private func resolveTargetLayoutName(textWasRussian: Bool) -> String? {
         let settings = SettingsManager.shared

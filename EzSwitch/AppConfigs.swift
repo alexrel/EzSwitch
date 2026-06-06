@@ -269,9 +269,4 @@ final class AppConfigRegistry {
     static func frontmostAppBundleId() -> String? {
         return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
-
-    /// Get name of the currently active application
-    static func frontmostAppName() -> String? {
-        return NSWorkspace.shared.frontmostApplication?.localizedName
-    }
 }

@@ -12,7 +12,8 @@ class StatusBarController: NSObject {
         popover = NSPopover()
         
         // Configure popover size and behavior
-        popover.contentSize = NSSize(width: 420, height: 520)
+        // Height is the *minimum* preferred size; SwiftUI can grow it with fixedSize
+        popover.contentSize = NSSize(width: 420, height: 200)
         popover.behavior = .transient
         
         // Create ViewController with settings
@@ -110,23 +111,5 @@ class StatusBarController: NSObject {
             
             print("✅ Popover shown")
         }
-    }
-    
-    func updateStatusIcon(enabled: Bool) {
-        guard let button = statusItem.button else { return }
-        
-        if #available(macOS 11.0, *) {
-            let imageName = enabled ? "keyboard.fill" : "keyboard"
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-            
-            if let image = NSImage(systemSymbolName: imageName, accessibilityDescription: "EzSwitch") {
-                button.image = image.withSymbolConfiguration(config)
-                button.image?.isTemplate = true // ← Template for adaptation
-            }
-        } else {
-            button.title = enabled ? "⌨️" : "❌"
-        }
-        
-        updateTooltip()
     }
 }

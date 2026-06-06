@@ -38,3 +38,64 @@
 "—" = "—";
 "Left" = "Левый";
 "Right" = "Правый";
+
+/* Mappers */
+"Keyboard Mappers" = "Мапперы клавиатуры";
+"Open Mappers…" = "Открыть мапперы…";
+"Configure character mappings for any pair of keyboard layouts." = "Настройте маппинг символов для любой пары раскладок клавиатуры.";
+"Pick a pair of languages to enable transformation" = "Выберите пару языков, чтобы включить трансформацию";
+"Active: %@ — %d chars" = "Активен: %@ — %d символов";
+"No mapping for this pair — click Open Mappers" = "Нет маппинга для этой пары — нажмите «Открыть мапперы»";
+"EzSwitch — Mappers" = "EzSwitch — Мапперы";
+
+/* Mapper settings */
+"Layout pair" = "Пара раскладок";
+"From" = "Из";
+"To" = "В";
+"Swap" = "Поменять местами";
+"Presets" = "Пресеты";
+"No presets for this pair" = "Нет пресетов для этой пары";
+"Create a new one or auto-generate" = "Создайте новый или сгенерируйте автоматически";
+"New" = "Новый";
+"Auto" = "Авто";
+"Edit" = "Редактировать";
+"Delete" = "Удалить";
+"Rename" = "Переименовать";
+"Duplicate" = "Дублировать";
+"Open in editor" = "Открыть в редакторе";
+"Cancel" = "Отмена";
+"Create" = "Создать";
+"Save" = "Сохранить";
+"Save preset" = "Сохранить пресет";
+"Done" = "Готово";
+"Clear" = "Очистить";
+"Name" = "Имя";
+"Example" = "Пример: ghbdtn";
+
+/* Mapper editor */
+"Mapper editor" = "Редактор маппинга";
+"%d characters" = "%d символов";
+"Test mapping" = "Тест маппинга";
+"Auto-generate" = "Авто-генерация";
+"Enter text to test…" = "Введите текст для проверки…";
+"Map key" = "Сопоставить клавишу";
+"Source" = "Источник";
+"Target" = "Цель";
+"Suggestions" = "Предложения";
+"Quick test" = "Быстрый тест";
+"Input" = "Ввод";
+"Result" = "Результат";
+"Current mapping" = "Текущий маппинг";
+"Mapping is empty" = "Маппинг пуст";
+"Metadata" = "Метаданные";
+"ID" = "ID";
+"Created" = "Создан";
+"Updated" = "Обновлён";
+"No modifier" = "Без модификатора";
+"Shift + Option" = "Shift + Option";
+"Input (%@)" = "Ввод (%@)";
+"Result (%@)" = "Результат (%@)";
+
+/* Sections */
+"No modifier (base)" = "Без модификаторов";
+"With Shift held" = "С зажатым Shift";

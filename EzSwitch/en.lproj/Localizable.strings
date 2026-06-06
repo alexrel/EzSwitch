@@ -38,3 +38,64 @@
 "—" = "—";
 "Left" = "Left";
 "Right" = "Right";
+
+/* Mappers */
+"Keyboard Mappers" = "Keyboard Mappers";
+"Open Mappers…" = "Open Mappers…";
+"Configure character mappings for any pair of keyboard layouts." = "Configure character mappings for any pair of keyboard layouts.";
+"Pick a pair of languages to enable transformation" = "Pick a pair of languages to enable transformation";
+"Active: %@ — %d chars" = "Active: %@ — %d chars";
+"No mapping for this pair — click Open Mappers" = "No mapping for this pair — click Open Mappers";
+"EzSwitch — Mappers" = "EzSwitch — Mappers";
+
+/* Mapper settings */
+"Layout pair" = "Layout pair";
+"From" = "From";
+"To" = "To";
+"Swap" = "Swap";
+"Presets" = "Presets";
+"No presets for this pair" = "No presets for this pair";
+"Create a new one or auto-generate" = "Create a new one or auto-generate";
+"New" = "New";
+"Auto" = "Auto";
+"Edit" = "Edit";
+"Delete" = "Delete";
+"Rename" = "Rename";
+"Duplicate" = "Duplicate";
+"Open in editor" = "Open in editor";
+"Cancel" = "Cancel";
+"Create" = "Create";
+"Save" = "Save";
+"Save preset" = "Save preset";
+"Done" = "Done";
+"Clear" = "Clear";
+"Name" = "Name";
+"Example" = "Example: ghbdtn";
+
+/* Mapper editor */
+"Mapper editor" = "Mapper editor";
+"%d characters" = "%d characters";
+"Test mapping" = "Test mapping";
+"Auto-generate" = "Auto-generate";
+"Enter text to test…" = "Enter text to test…";
+"Map key" = "Map key";
+"Source" = "Source";
+"Target" = "Target";
+"Suggestions" = "Suggestions";
+"Quick test" = "Quick test";
+"Input" = "Input";
+"Result" = "Result";
+"Current mapping" = "Current mapping";
+"Mapping is empty" = "Mapping is empty";
+"Metadata" = "Metadata";
+"ID" = "ID";
+"Created" = "Created";
+"Updated" = "Updated";
+"No modifier" = "No modifier";
+"Shift + Option" = "Shift + Option";
+"Input (%@)" = "Input (%@)";
+"Result (%@)" = "Result (%@)";
+
+/* Sections */
+"No modifier (base)" = "No modifier (base)";
+"With Shift held" = "With Shift held";

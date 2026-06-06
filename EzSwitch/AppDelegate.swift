@@ -16,11 +16,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarController = StatusBarController()
         print("✅ StatusBar initialized")
 
-        // 4. Start keyboard monitoring ALWAYS
-        //    (HID listen-only tap requires Input Monitoring, not Accessibility)
+        // 4. Keyboard monitoring is started by SettingsManager.shared on init
+        //    (it reads suppressTransformKey from UserDefaults and passes
+        //    `suppressEvents:` accordingly). We do NOT call startMonitoring()
+        //    here unconditionally, as that would override the user's setting.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            print("🔄 Starting KeyboardManager...")
-            KeyboardManager.shared.startMonitoring()
+            print("🔄 Keyboard monitoring delegated to SettingsManager")
         }
 
         // 5. If Accessibility not granted — warn user (for TextTransformer/selection)
@@ -33,6 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // KeyboardManager stops itself on deinit, but explicit stop is safer
         KeyboardManager.shared.stopMonitoring()
     }
 

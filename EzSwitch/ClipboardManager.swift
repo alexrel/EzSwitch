@@ -93,15 +93,10 @@ final class ClipboardManager {
     /// Set marker in clipboard and return changeCount
     func setMarker() -> (marker: String, changeCount: Int) {
         let pb = NSPasteboard.general
-        let marker = "__EZ_\(arc4random())__"
+        let marker = "\(Constants.ClipboardMarker.prefix)\(arc4random())__"
         pb.clearContents()
         pb.setString(marker, forType: .string)
         return (marker, pb.changeCount)
-    }
-
-    /// Get string from clipboard
-    func getString() -> String? {
-        return NSPasteboard.general.string(forType: .string)
     }
 
     /// Current changeCount
@@ -110,7 +105,12 @@ final class ClipboardManager {
     }
 
     /// Wait for clipboard to change after copy
-    func waitForChange(marker: String, markerCount: Int, timeoutMs: Int = 350, pollStepUs: useconds_t = 3_000) -> String? {
+    func waitForChange(
+        marker: String,
+        markerCount: Int,
+        timeoutMs: Int = Int(Constants.Timing.captureTimeoutSec * 1000),
+        pollStepUs: useconds_t = Constants.Timing.capturePollStepUs
+    ) -> String? {
         let pb = NSPasteboard.general
         let steps = max(1, (timeoutMs * 1000) / Int(pollStepUs))
 
