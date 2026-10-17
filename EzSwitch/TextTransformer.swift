@@ -144,9 +144,9 @@ final class TextTransformer {
     }
 
     private func completeBranchA(selectedText: String, isRussian: Bool, savedState: ClipboardManager.ClipboardState, skipLayoutSwitch: Bool = false) {
-        // Detect language from TEXT content, not keyboard layout
-        let textWasRussian = textIsRussian(selectedText)
-        let transformed = doTransform(selectedText, fromRussian: textWasRussian)
+        // Plan multi-language transformation & cycling
+        let plan = planTransform(for: selectedText)
+        let transformed = plan.transformedText
         print("🔄 [Branch A] Transform: \"\(selectedText.prefix(30))\" → \"\(transformed.prefix(30))\"")
 
         // Put transformed text to clipboard and paste (single Undo action)
@@ -158,10 +158,10 @@ final class TextTransformer {
         simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
         usleep(pasteSettleUs)
 
-        // Switch layout if enabled (based on text language, not keyboard)
+        // Switch layout if enabled (based on plan.targetLayout)
         // Skip if modifier key was held during double-tap
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
-            if let target = resolveTargetLayoutName(textWasRussian: textWasRussian) {
+            if let target = plan.targetLayout {
                 print("⌨️  [Branch A] Switching layout to: \(target)")
                 KeyboardManager.shared.switchToLayout(named: target)
             }
@@ -220,9 +220,9 @@ final class TextTransformer {
             usleep(keySequenceDelayUs)
         }
 
-        // Transform and paste (detect language from text, not keyboard)
-        let textWasRussian = textIsRussian(parsed.word)
-        let transformedWord = doTransform(parsed.word, fromRussian: textWasRussian)
+        // Transform and paste (supporting multi-language cycle)
+        let plan = planTransform(for: parsed.word)
+        let transformedWord = plan.transformedText
         let replacement = transformedWord + parsed.trailingSpaces
         print("🔄 [Branch B] Transform: \"\(parsed.word)\" → \"\(transformedWord)\"")
 
@@ -234,10 +234,10 @@ final class TextTransformer {
         simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
         usleep(pasteSettleUs)
 
-        // Switch layout if enabled (based on text language)
+        // Switch layout if enabled (based on plan.targetLayout)
         // Skip if modifier key was held during double-tap
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
-            if let target = resolveTargetLayoutName(textWasRussian: textWasRussian) {
+            if let target = plan.targetLayout {
                 print("⌨️  [Branch B] Switching layout to: \(target)")
                 KeyboardManager.shared.switchToLayout(named: target)
             }
@@ -467,6 +467,234 @@ final class TextTransformer {
         let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         up?.flags = [.maskShift]
         up?.post(tap: .cgAnnotatedSessionEventTap)
+    }
+
+    // MARK: - Experimental Multi-Language Pivot & Cycle
+    // Added as an experimental feature: allows seamless cycling across multiple
+    // languages (e.g. Hebrew -> Russian -> English -> Undo) using 'previousLayout'
+    // and presets connecting to the primary switcher pair.
+
+    struct TransformPlan {
+        let transformedText: String
+        let targetLayout: String?
+    }
+
+    private struct TransformCycle {
+        let originalText: String
+        let originalLayout: String
+        let steps: [(targetLayout: String, text: String)]
+        var currentStepIndex: Int
+        var timestamp: Date
+    }
+
+    private var activeCycle: TransformCycle?
+
+    private enum ScriptType {
+        case hebrew
+        case cyrillic
+        case latin
+        case unknown
+    }
+
+    private func textHasHebrew(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if scalar.value >= 0x0590 && scalar.value <= 0x05FF { return true }
+        }
+        return false
+    }
+
+    private func textHasCyrillic(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if scalar.value >= Constants.Unicode.cyrillicLower && scalar.value <= Constants.Unicode.cyrillicUpper {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func textHasLatin(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if (scalar.value >= 0x0041 && scalar.value <= 0x005A) ||
+               (scalar.value >= 0x0061 && scalar.value <= 0x007A) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func layoutsMatch(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        let cleanA = a.replacingOccurrences(of: "—", with: "-").replacingOccurrences(of: "–", with: "-").trimmingCharacters(in: .whitespaces).lowercased()
+        let cleanB = b.replacingOccurrences(of: "—", with: "-").replacingOccurrences(of: "–", with: "-").trimmingCharacters(in: .whitespaces).lowercased()
+        return cleanA == cleanB
+    }
+
+    private func findLayoutMatching(script: ScriptType, current: String) -> String? {
+        let isMatchingCurrent: Bool
+        switch script {
+        case .hebrew: isMatchingCurrent = current.lowercased().contains("hebrew")
+        case .cyrillic: isMatchingCurrent = current.lowercased().contains("russian")
+        case .latin: isMatchingCurrent = current.lowercased().contains("abc") || current.lowercased().contains("u.s.") || current.lowercased().contains("english")
+        case .unknown: isMatchingCurrent = false
+        }
+        if isMatchingCurrent { return current }
+
+        for preset in MapperStore.shared.presets {
+            for name in [preset.pair.from, preset.pair.to] {
+                switch script {
+                case .hebrew:
+                    if name.lowercased().contains("hebrew") { return name }
+                case .cyrillic:
+                    if name.lowercased().contains("russian") { return name }
+                case .latin:
+                    if name.lowercased().contains("abc") || name.lowercased().contains("u.s.") || name.lowercased().contains("english") { return name }
+                case .unknown: break
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Transforms `text` between any two layouts using direct presets or a bridge hop if needed.
+    func transform(text: String, from fromLayout: String, to toLayout: String) -> String? {
+        if layoutsMatch(fromLayout, toLayout) { return text }
+        let store = MapperStore.shared
+
+        // 1. Try direct presets
+        let directPresets = store.presets(for: LayoutPair(from: fromLayout, to: toLayout))
+        if let preset = directPresets.first {
+            let mapping = preset.characterMapping()
+            if layoutsMatch(preset.pair.from, fromLayout) {
+                let res = applyForward(text, mapper: mapping)
+                if res != text { return res }
+            } else {
+                let res = applyReverse(text, forward: mapping)
+                if res != text { return res }
+            }
+        }
+
+        // 2. Try bridging via an intermediate layout (e.g. Hebrew -> Russian -> English)
+        for preset in store.presets {
+            let pair = preset.pair
+            var bridge: String? = nil
+            if layoutsMatch(pair.from, fromLayout) { bridge = pair.to }
+            else if layoutsMatch(pair.to, fromLayout) { bridge = pair.from }
+
+            if let b = bridge, !layoutsMatch(b, fromLayout), !layoutsMatch(b, toLayout) {
+                let secondHop = store.presets(for: LayoutPair(from: b, to: toLayout))
+                if !secondHop.isEmpty {
+                    if let intermediate = transform(text: text, from: fromLayout, to: b),
+                       intermediate != text,
+                       let finalResult = transform(text: intermediate, from: b, to: toLayout) {
+                        return finalResult
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Plans and returns the text transformation and target layout for a given input word/selection,
+    /// supporting multi-language cycling and prioritizing previousLayout.
+    private func planTransform(for rawText: String) -> TransformPlan {
+        let now = Date()
+
+        // 1. Check for consecutive Double Shift (Cycle advancement)
+        if let cycle = activeCycle,
+           now.timeIntervalSince(cycle.timestamp) < 2.5,
+           (rawText == cycle.steps[cycle.currentStepIndex].text || rawText == cycle.originalText) {
+
+            let nextIndex = cycle.currentStepIndex + 1
+            if nextIndex < cycle.steps.count {
+                activeCycle?.currentStepIndex = nextIndex
+                activeCycle?.timestamp = now
+                let step = cycle.steps[nextIndex]
+                print("🔄 [Transform Cycle] Advancing to step \(nextIndex + 1)/\(cycle.steps.count): -> \(step.targetLayout)")
+                return TransformPlan(transformedText: step.text, targetLayout: step.targetLayout)
+            } else {
+                // Reached end of cycle -> Undo back to original input!
+                print("🔄 [Transform Cycle] Reached end -> Undo to original layout: \(cycle.originalLayout)")
+                activeCycle = nil
+                return TransformPlan(transformedText: cycle.originalText, targetLayout: cycle.originalLayout)
+            }
+        }
+
+        // 2. Fresh transformation
+        let km = KeyboardManager.shared
+        let currentLayout = km.currentLayoutName() ?? km.currentLayoutID
+        let previousLayout = km.previousLayoutID
+        let settings = SettingsManager.shared
+        let primaryLanguages = [settings.leftCommandLanguage, settings.rightCommandLanguage]
+            .filter { $0 != Constants.Default.noneLanguage && !$0.isEmpty }
+
+        // Determine source layout based on script detection in text, with currentLayout fallback
+        var sourceLayout = currentLayout
+        if textHasHebrew(rawText), let matched = findLayoutMatching(script: .hebrew, current: currentLayout) {
+            sourceLayout = matched
+        } else if textHasCyrillic(rawText), let matched = findLayoutMatching(script: .cyrillic, current: currentLayout) {
+            sourceLayout = matched
+        } else if textHasLatin(rawText), let matched = findLayoutMatching(script: .latin, current: currentLayout) {
+            sourceLayout = matched
+        }
+
+        print("🔄 [planTransform] Text: \"\(rawText)\", sourceLayout: \(sourceLayout), current: \(currentLayout), previous: \(previousLayout)")
+
+        // Determine target candidates:
+        // Candidates are ONLY chosen from the user's primary switcher pair (e.g. Russian and English).
+        var targetCandidates: [String] = []
+
+        let sourceIsPrimary = primaryLanguages.contains(where: { layoutsMatch($0, sourceLayout) })
+        if sourceIsPrimary {
+            // Source is one of the primary languages -> target is the other primary language
+            for lang in primaryLanguages {
+                if !layoutsMatch(lang, sourceLayout) {
+                    targetCandidates.append(lang)
+                }
+            }
+        } else {
+            // Source is a 3rd language (e.g. Hebrew or Spanish):
+            // Prioritize previousLayout if it belongs to primaryLanguages
+            if !previousLayout.isEmpty,
+               primaryLanguages.contains(where: { layoutsMatch($0, previousLayout) }),
+               !layoutsMatch(previousLayout, sourceLayout) {
+                targetCandidates.append(previousLayout)
+            }
+            // Append remaining primary languages
+            for lang in primaryLanguages {
+                if !targetCandidates.contains(where: { layoutsMatch($0, lang) }) && !layoutsMatch(lang, sourceLayout) {
+                    targetCandidates.append(lang)
+                }
+            }
+        }
+
+        // Build cycle transformation steps
+        var steps: [(targetLayout: String, text: String)] = []
+        for candidate in targetCandidates {
+            if let transformed = transform(text: rawText, from: sourceLayout, to: candidate),
+               transformed != rawText {
+                steps.append((targetLayout: candidate, text: transformed))
+            }
+        }
+
+        // If no direct transformation was produced by presets, fall back to legacy doTransform
+        if steps.isEmpty {
+            let legacyTransformed = doTransform(rawText, fromRussian: textIsRussian(rawText))
+            let legacyTarget = resolveTargetLayoutName(textWasRussian: textIsRussian(rawText))
+            return TransformPlan(transformedText: legacyTransformed, targetLayout: legacyTarget)
+        }
+
+        // Save active cycle state
+        activeCycle = TransformCycle(
+            originalText: rawText,
+            originalLayout: sourceLayout,
+            steps: steps,
+            currentStepIndex: 0,
+            timestamp: now
+        )
+
+        let firstStep = steps[0]
+        print("🔄 [planTransform] Cycle initiated with \(steps.count) step(s). First target: \(firstStep.targetLayout)")
+        return TransformPlan(transformedText: firstStep.text, targetLayout: firstStep.targetLayout)
     }
 
     // MARK: - Transform Logic

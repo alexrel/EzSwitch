@@ -45,14 +45,33 @@ final class KeyboardManager {
     /// True while we are programmatically sending backspaces + Cmd+V so
     /// our own synthetic events do not mutate `wordBuffer`.
     private var isReplacingWord = false
-    /// Last layout we switched TO (via Cmd/Option tap or initial). Used as
-    /// a fallback when the live layout query returns something we don't know.
-    private var currentLayoutID: String = ""
+    /// Last layout we switched TO or currently active layout name.
+    public private(set) var currentLayoutID: String = ""
+    /// Previous layout before the current switch (used to determine where we came from).
+    public private(set) var previousLayoutID: String = ""
 
     // Key codes
     private let deleteKeyCode: Int = Constants.KeyCode.delete // kVK_Delete (backspace)
 
     private init() {
+        if let initial = currentLayoutName() {
+            currentLayoutID = initial
+        }
+
+        // Observe layout changes system-wide from Carbon / macOS
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDistributedCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let manager = Unmanaged<KeyboardManager>.fromOpaque(observer).takeUnretainedValue()
+                _ = manager.currentLayoutName()
+            },
+            kTISNotifySelectedKeyboardInputSourceChanged,
+            nil,
+            .deliverImmediately
+        )
+
         // Clear word buffer whenever the user switches active applications
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -60,6 +79,7 @@ final class KeyboardManager {
             queue: .main
         ) { [weak self] _ in
             self?.wordBuffer.removeAll()
+            _ = self?.currentLayoutName()
         }
     }
 
@@ -355,6 +375,10 @@ final class KeyboardManager {
 
     func switchToLayout(named: String) {
         if named == Constants.Default.noneLanguage { return }
+        if !currentLayoutID.isEmpty && currentLayoutID != named {
+            previousLayoutID = currentLayoutID
+        }
+        currentLayoutID = named
 
         let sources = TISCreateInputSourceList(nil, false).takeRetainedValue() as! [TISInputSource]
         for s in sources {
@@ -587,14 +611,19 @@ final class KeyboardManager {
     }
 
     /// Localized name of the keyboard layout currently driving key events.
-    private func currentLayoutName() -> String? {
+    func currentLayoutName() -> String? {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
-            return nil
+            return currentLayoutID.isEmpty ? nil : currentLayoutID
         }
         guard let ptr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else {
-            return nil
+            return currentLayoutID.isEmpty ? nil : currentLayoutID
         }
-        return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        let name = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        if !currentLayoutID.isEmpty && currentLayoutID != name {
+            previousLayoutID = currentLayoutID
+        }
+        currentLayoutID = name
+        return name
     }
 
     /// Erase `originalLength` chars (since the separator key event was already

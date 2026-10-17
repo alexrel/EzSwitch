@@ -73,14 +73,24 @@ struct MapperSettingsView: View {
         .onAppear {
             reloadLayouts()
             if fromLayout.isEmpty {
-                fromLayout = settings.leftCommandLanguage != Constants.Default.noneLanguage
-                    ? settings.leftCommandLanguage
-                    : Constants.Default.leftLanguage
+                let savedFrom = UserDefaults.standard.string(forKey: "lastMapperFromLayout")
+                if let savedFrom = savedFrom, availableLayouts.contains(savedFrom) {
+                    fromLayout = savedFrom
+                } else {
+                    fromLayout = settings.leftCommandLanguage != Constants.Default.noneLanguage
+                        ? settings.leftCommandLanguage
+                        : Constants.Default.leftLanguage
+                }
             }
             if toLayout.isEmpty {
-                toLayout = settings.rightCommandLanguage != Constants.Default.noneLanguage
-                    ? settings.rightCommandLanguage
-                    : Constants.Default.rightLanguage
+                let savedTo = UserDefaults.standard.string(forKey: "lastMapperToLayout")
+                if let savedTo = savedTo, availableLayouts.contains(savedTo) {
+                    toLayout = savedTo
+                } else {
+                    toLayout = settings.rightCommandLanguage != Constants.Default.noneLanguage
+                        ? settings.rightCommandLanguage
+                        : Constants.Default.rightLanguage
+                }
             }
             mode = initialMode
             working = selectPresetForCurrentPair()
@@ -90,10 +100,12 @@ struct MapperSettingsView: View {
                 mode = newMode
             }
         }
-        .onChange(of: fromLayout) { _, _ in
+        .onChange(of: fromLayout) { _, newVal in
+            UserDefaults.standard.set(newVal, forKey: "lastMapperFromLayout")
             working = selectPresetForCurrentPair()
         }
-        .onChange(of: toLayout) { _, _ in
+        .onChange(of: toLayout) { _, newVal in
+            UserDefaults.standard.set(newVal, forKey: "lastMapperToLayout")
             working = selectPresetForCurrentPair()
         }
         .sheet(isPresented: $showNewSheet) {
