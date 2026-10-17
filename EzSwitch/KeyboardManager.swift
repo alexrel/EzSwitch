@@ -561,8 +561,8 @@ final class KeyboardManager {
             print("💡 [WordSub] Skipped remember '\(word)' — no character mapping available")
             return
         }
-        WordMapperStore.shared.set(source: word, target: other, switchLayout: true, for: pair)
-        print("💡 [WordSub] Saved '\(word)' → '\(other)' (switchLayout: true) for pair \(pair.from)|\(pair.to)")
+        WordMapperStore.shared.set(source: word, target: other, switchLayout: false, for: pair)
+        print("💡 [WordSub] Saved '\(word)' → '\(other)' (switchLayout: false) for pair \(pair.from)|\(pair.to)")
     }
 
     /// The pair whose `from` is the current layout. If the current layout is
