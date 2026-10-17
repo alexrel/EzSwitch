@@ -26,14 +26,16 @@ struct Hotkey: Codable, Equatable, Hashable {
 
     var isSet: Bool { keyCode != 0 || modifiers != 0 }
 
-    /// Human-readable label like "⌘⇧M". Falls back to key code for unknown keys.
+    /// Human-readable label like "⌘⇧M". Falls back to localized "None" when unassigned.
     var displayLabel: String {
-        displayTokens.joined()
+        guard isSet else { return String(localized: "None") }
+        return displayTokens.joined()
     }
 
     /// List of individual key labels like `["⌘", "⇧", "M"]` for rendering as separate keycaps.
+    /// Returns an empty array if no hotkey is set.
     var displayTokens: [String] {
-        guard isSet else { return ["—"] }
+        guard isSet else { return [] }
         var parts: [String] = []
         if modifiers & Constants.ModifierMask.command != 0 { parts.append("⌘") }
         if modifiers & Constants.ModifierMask.shift   != 0 { parts.append("⇧") }

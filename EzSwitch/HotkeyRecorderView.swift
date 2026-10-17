@@ -56,31 +56,38 @@ struct KeycapsView: View {
     }
 
     var body: some View {
-        HStack(spacing: scale == .large ? 4 : 2.5) {
-            ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
-                Text(token)
-                    .font(.system(size: fontSize, weight: .semibold, design: .rounded))
-                    .foregroundColor(.primary.opacity(0.88))
-                    .frame(minWidth: minWidth, minHeight: minHeight)
-                    .padding(.horizontal, hPadding)
-                    .background(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(
-                                colorScheme == .dark
-                                    ? Color.white.opacity(0.2)
-                                    : Color.black.opacity(0.18),
-                                lineWidth: scale == .large ? 0.8 : 0.5
-                            )
-                    )
-                    .shadow(
-                        color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.08),
-                        radius: scale == .large ? 1.5 : 0.6,
-                        y: scale == .large ? 1 : 0.5
-                    )
+        if tokens.isEmpty {
+            Text(String(localized: "None"))
+                .font(.system(size: fontSize, weight: .regular, design: .rounded))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+        } else {
+            HStack(spacing: scale == .large ? 4 : 2.5) {
+                ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
+                    Text(token)
+                        .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary.opacity(0.88))
+                        .frame(minWidth: minWidth, minHeight: minHeight)
+                        .padding(.horizontal, hPadding)
+                        .background(
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .stroke(
+                                    colorScheme == .dark
+                                        ? Color.white.opacity(0.2)
+                                        : Color.black.opacity(0.18),
+                                    lineWidth: scale == .large ? 0.8 : 0.5
+                                )
+                        )
+                        .shadow(
+                            color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.08),
+                            radius: scale == .large ? 1.5 : 0.6,
+                            y: scale == .large ? 1 : 0.5
+                        )
+                }
             }
         }
     }
@@ -122,12 +129,20 @@ struct HotkeyRecorderView: View {
                     .frame(width: 60, alignment: .leading)
 
                 HStack(spacing: 8) {
-                    KeycapsView(tokens: activeHotkey.displayTokens, scale: .large)
+                    if activeHotkey.isSet {
+                        KeycapsView(tokens: activeHotkey.displayTokens, scale: .large)
 
-                    if captured != nil {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.system(size: 16))
+                        if captured?.isSet == true {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 16))
+                        }
+                    } else {
+                        Text(String(localized: "Not set"))
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -139,10 +154,10 @@ struct HotkeyRecorderView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .stroke(
-                            captured != nil
+                            (captured?.isSet == true)
                                 ? Color.accentColor.opacity(0.7)
                                 : Color.primary.opacity(0.08),
-                            lineWidth: captured != nil ? 1.5 : 1
+                            lineWidth: (captured?.isSet == true) ? 1.5 : 1
                         )
                 )
 
@@ -152,7 +167,6 @@ struct HotkeyRecorderView: View {
             // Modern bordered actions
             HStack(spacing: 8) {
                 Button {
-                    hotkey = .none
                     captured = Hotkey.none
                 } label: {
                     Label(String(localized: "Clear"), systemImage: "trash")
@@ -160,6 +174,7 @@ struct HotkeyRecorderView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
+                .focusable(false)
 
                 Spacer()
 
@@ -169,6 +184,7 @@ struct HotkeyRecorderView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .keyboardShortcut(.cancelAction)
+                .focusable(false)
 
                 Button {
                     if let c = captured { hotkey = c }

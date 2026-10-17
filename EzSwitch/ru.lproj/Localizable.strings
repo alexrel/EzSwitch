@@ -130,4 +130,5 @@
 "No words saved yet" = "Слов пока нет";
 "%d words for current pair" = "%d слов для текущей пары";
 "EzSwitch — Custom Rules (Mappers & Words)" = "EzSwitch — Правила (мапперы и слова)";
-
+"Not set" = "Не задано";
+"None" = "Нет";
