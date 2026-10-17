@@ -559,8 +559,14 @@ struct MapperEditorView: View {
                         Text(lookupSource(for: key, modifier: editingModifier))
                             .font(.system(size: 22, weight: .bold, design: .rounded))
                             .frame(width: 44, height: 44)
-                            .background(Color.accentColor.opacity(0.15))
-                            .cornerRadius(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+                            )
                     }
                     Image(systemName: "arrow.right")
                         .font(.body)
@@ -570,11 +576,18 @@ struct MapperEditorView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         TextField("", text: $pickerChar)
+                            .textFieldStyle(.plain)
                             .font(.system(size: 22, weight: .bold, design: .rounded))
                             .multilineTextAlignment(.center)
                             .frame(width: 80, height: 44)
-                            .background(Color.accentColor.opacity(0.15))
-                            .cornerRadius(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
+                            )
                             .help(String(localized: "Type any character, emoji or symbol"))
                     }
                     Spacer()
@@ -856,11 +869,18 @@ struct MapperEditorView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         TextField("?", text: mapping.source)
+                            .textFieldStyle(.plain)
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .multilineTextAlignment(.center)
                             .frame(width: 90, height: 42)
-                            .background(Color.accentColor.opacity(0.12))
-                            .cornerRadius(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
+                            )
                             .onChange(of: mapping.source.wrappedValue) { _, newValue in
                                 if newValue.contains(where: { $0.isUppercase }) && mapping.modifier.wrappedValue == .none {
                                     mapping.modifier.wrappedValue = .shift
@@ -875,11 +895,18 @@ struct MapperEditorView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         TextField("", text: mapping.target)
+                            .textFieldStyle(.plain)
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .multilineTextAlignment(.center)
                             .frame(width: 110, height: 42)
-                            .background(Color.accentColor.opacity(0.12))
-                            .cornerRadius(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
+                            )
                             .help(String(localized: "Type any character, emoji or symbol"))
                     }
                     Spacer()

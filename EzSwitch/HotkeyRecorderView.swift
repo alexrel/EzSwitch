@@ -2,6 +2,90 @@ import SwiftUI
 import AppKit
 import Carbon
 
+/// Visual representation of hotkey tokens as physical-style keyboard keycaps.
+struct KeycapsView: View {
+    let tokens: [String]
+    var scale: KeycapScale = .regular
+
+    enum KeycapScale {
+        case small    // For compact lists and inline labels (e.g. Settings card)
+        case regular  // For buttons and toolbars (e.g. WordSubstitution toolbar)
+        case large    // For hero presentation (e.g. Hotkey recorder sheet)
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var fontSize: CGFloat {
+        switch scale {
+        case .small: return 10
+        case .regular: return 11
+        case .large: return 15
+        }
+    }
+
+    private var minWidth: CGFloat {
+        switch scale {
+        case .small: return 15
+        case .regular: return 19
+        case .large: return 28
+        }
+    }
+
+    private var minHeight: CGFloat {
+        switch scale {
+        case .small: return 14
+        case .regular: return 18
+        case .large: return 28
+        }
+    }
+
+    private var cornerRadius: CGFloat {
+        switch scale {
+        case .small: return 3.5
+        case .regular: return 4.5
+        case .large: return 6.5
+        }
+    }
+
+    private var hPadding: CGFloat {
+        switch scale {
+        case .small: return 3
+        case .regular: return 5
+        case .large: return 8
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: scale == .large ? 4 : 2.5) {
+            ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
+                Text(token)
+                    .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.88))
+                    .frame(minWidth: minWidth, minHeight: minHeight)
+                    .padding(.horizontal, hPadding)
+                    .background(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(
+                                colorScheme == .dark
+                                    ? Color.white.opacity(0.2)
+                                    : Color.black.opacity(0.18),
+                                lineWidth: scale == .large ? 0.8 : 0.5
+                            )
+                    )
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.08),
+                        radius: scale == .large ? 1.5 : 0.6,
+                        y: scale == .large ? 1 : 0.5
+                    )
+            }
+        }
+    }
+}
+
 /// Modal sheet for assigning a keyboard shortcut to an action.
 ///
 /// Uses a local NSEvent monitor (so the global CGEvent tap in
@@ -15,56 +99,91 @@ struct HotkeyRecorderView: View {
     @State private var captured: Hotkey? = nil
     @State private var monitor: Any? = nil
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(String(localized: "Set Hotkey for \(actionName)"))
-                .font(.system(size: 14, weight: .semibold))
-            Text(String(localized: "Press a key combination. Cmd, Shift, Option, Control and a single key are required."))
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    private var activeHotkey: Hotkey {
+        captured ?? hotkey
+    }
 
-            HStack {
-                Text(String(localized: "Hotkey"))
-                    .frame(width: 80, alignment: .trailing)
-                    .font(.system(size: 12))
-                Text(captured?.displayLabel ?? hotkey.displayLabel)
-                    .font(.system(size: 16, design: .monospaced))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(NSColor.controlBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.accentColor.opacity(captured == nil ? 0 : 1), lineWidth: 1.5)
-                    )
-                if captured != nil {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.accentColor)
-                }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(localized: "Set Hotkey for \(actionName)"))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                Text(String(localized: "Press a key combination. Cmd, Shift, Option, Control and a single key are required."))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack {
-                Button(String(localized: "Clear")) {
+            // Hero hotkey presentation using realistic keycaps
+            HStack(spacing: 12) {
+                Text(String(localized: "Hotkey"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    KeycapsView(tokens: activeHotkey.displayTokens, scale: .large)
+
+                    if captured != nil {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 16))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color(NSColor.controlBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(
+                            captured != nil
+                                ? Color.accentColor.opacity(0.7)
+                                : Color.primary.opacity(0.08),
+                            lineWidth: captured != nil ? 1.5 : 1
+                        )
+                )
+
+                Spacer()
+            }
+
+            // Modern bordered actions
+            HStack(spacing: 8) {
+                Button {
                     hotkey = .none
                     captured = Hotkey.none
+                } label: {
+                    Label(String(localized: "Clear"), systemImage: "trash")
                 }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
+                .tint(.red)
+
                 Spacer()
-                Button(String(localized: "Cancel"), action: onClose)
-                    .keyboardShortcut(.cancelAction)
-                Button(String(localized: "Save")) {
+
+                Button(action: onClose) {
+                    Label(String(localized: "Cancel"), systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+
+                Button {
                     if let c = captured { hotkey = c }
                     onClose()
+                } label: {
+                    Label(String(localized: "Save"), systemImage: "checkmark")
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
                 .disabled(captured == nil)
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 440)
         .onAppear { installMonitor() }
         .onDisappear { removeMonitor() }
     }

@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var isLoaded = false
     @State private var hasAccessibility = false
     @State private var showAboutPopover = false
+    @State private var showHotkeySheet = false
 
     private let noneOption = "None"
 
@@ -47,7 +48,7 @@ struct SettingsView: View {
         ZStack {
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(red: 0.94, green: 0.96, blue: 1.0),
+                    Color(red: 0.93, green: 0.95, blue: 1.0),
                     Color(red: 0.96, green: 0.97, blue: 0.99)
                 ]),
                 startPoint: .topLeading,
@@ -57,25 +58,25 @@ struct SettingsView: View {
 
             VStack(spacing: 8) {
                 // Compact header
-                HStack(spacing: 10) {
+                HStack(spacing: 9) {
                     if let appIcon = NSImage(named: "AppIcon") {
                         Image(nsImage: appIcon)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 32, height: 32)
-                            .cornerRadius(7)
+                            .frame(width: 28, height: 28)
+                            .cornerRadius(6)
                             .shadow(color: Color.black.opacity(0.12), radius: 2, x: 0, y: 1)
                     } else {
                         Image(systemName: "keyboard")
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.blue)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 28, height: 28)
                             .background(Color.blue.opacity(0.1))
-                            .cornerRadius(7)
+                            .cornerRadius(6)
                     }
 
                     Text(String(localized: "EzSwitch Settings"))
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
 
                     Spacer()
@@ -97,6 +98,7 @@ struct SettingsView: View {
                     Circle()
                         .fill(hasAccessibility ? Color.green : Color.orange)
                         .frame(width: 8, height: 8)
+                        .help(hasAccessibility ? String(localized: "Permissions granted") : String(localized: "Permissions required"))
                 }
                 .padding(.top, 4)
 
@@ -148,9 +150,10 @@ struct SettingsView: View {
                                         Image(systemName: "key.fill")
                                             .foregroundColor(.purple)
                                             .font(.system(size: 11))
-                                            .frame(width: 16)
+                                            .frame(width: 14)
                                         Text(String(localized: "Key"))
-                                            .font(.system(size: 12))
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(.secondary)
                                         Spacer()
                                         Picker("", selection: $settings.transformKeyType) {
                                             ForEach(TransformKeyType.allCases, id: \.self) { keyType in
@@ -162,6 +165,16 @@ struct SettingsView: View {
                                         .controlSize(.small)
                                         .focusable(false)
                                     }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .fill(Color.primary.opacity(0.035))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
+                                            )
+                                    )
 
                                     HStack(spacing: 12) {
                                         Toggle(String(localized: "Suppress in apps"), isOn: $settings.suppressTransformKey)
@@ -208,12 +221,21 @@ struct SettingsView: View {
                                 }
                                 Spacer()
                                 Button(action: openMappersWindow) {
-                                    Text(String(localized: "Open"))
-                                        .font(.system(size: 11, weight: .medium))
+                                    HStack(spacing: 3) {
+                                        Text(String(localized: "Open"))
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 8, weight: .bold))
+                                    }
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.purple)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(Color.purple.opacity(0.12))
+                                    )
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .tint(.purple)
+                                .buttonStyle(.plain)
                             }
 
                             presetPickerView
@@ -233,26 +255,37 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(currentWordSubstitutionInfo)
                                         .font(.system(size: 11, weight: .medium))
-                                    HStack(spacing: 4) {
-                                        Text(String(localized: "Quick remember:"))
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.secondary)
-                                        Text(settings.wordRememberHotkey.displayLabel)
-                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(Color.primary.opacity(0.08))
-                                            .cornerRadius(3)
+                                    Button {
+                                        showHotkeySheet = true
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            Text(String(localized: "Quick remember:"))
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.secondary)
+                                            KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .small)
+                                        }
+                                        .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
+                                    .help(String(localized: "Change hotkey for remembering words"))
                                 }
                                 Spacer()
                                 Button(action: openWordsWindow) {
-                                    Text(String(localized: "Open"))
-                                        .font(.system(size: 11, weight: .medium))
+                                    HStack(spacing: 3) {
+                                        Text(String(localized: "Open"))
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 8, weight: .bold))
+                                    }
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.indigo)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(Color.indigo.opacity(0.12))
+                                    )
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .tint(.indigo)
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -277,17 +310,22 @@ struct SettingsView: View {
                     // Action buttons row
                     HStack(spacing: 8) {
                         Button(action: restartApplication) {
-                            HStack(spacing: 4) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 10, weight: .semibold))
                                 Text(String(localized: "Restart"))
+                                    .font(.system(size: 11, weight: .medium))
                             }
-                            .font(.system(size: 11))
                             .foregroundColor(.blue)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                             .background(
-                                RoundedRectangle(cornerRadius: 7)
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .fill(Color.blue.opacity(0.1))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .stroke(Color.blue.opacity(0.18), lineWidth: 0.5)
+                                    )
                             )
                         }
                         .buttonStyle(.plain)
@@ -296,17 +334,22 @@ struct SettingsView: View {
                         Button(action: {
                             NSApplication.shared.terminate(nil)
                         }) {
-                            HStack(spacing: 4) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "power")
+                                    .font(.system(size: 10, weight: .semibold))
                                 Text(String(localized: "Quit"))
+                                    .font(.system(size: 11, weight: .medium))
                             }
-                            .font(.system(size: 11))
                             .foregroundColor(.red)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                             .background(
-                                RoundedRectangle(cornerRadius: 7)
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .fill(Color.red.opacity(0.1))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .stroke(Color.red.opacity(0.18), lineWidth: 0.5)
+                                    )
                             )
                         }
                         .buttonStyle(.plain)
@@ -366,6 +409,13 @@ struct SettingsView: View {
                 reloadAvailableLanguages()
                 checkPermissions()
             }
+        }
+        .sheet(isPresented: $showHotkeySheet) {
+            HotkeyRecorderView(
+                hotkey: $settings.wordRememberHotkey,
+                actionName: String(localized: "Remember Word"),
+                onClose: { showHotkeySheet = false }
+            )
         }
     }
 
@@ -457,9 +507,9 @@ struct SettingsView: View {
             Image(systemName: "hand.point.up.left.fill")
                 .foregroundColor(.blue)
                 .font(.system(size: 11))
-                .frame(width: 16)
+                .frame(width: 14)
             Text(String(localized: "Key"))
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
             Spacer()
             Picker("", selection: $settings.switchModifier) {
@@ -475,11 +525,11 @@ struct SettingsView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(Color.blue.opacity(0.06))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.blue.opacity(0.15), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
                 )
         )
     }
@@ -492,9 +542,10 @@ struct SettingsView: View {
                 Image(systemName: "list.bullet.rectangle.portrait")
                     .foregroundColor(.purple)
                     .font(.system(size: 11))
-                    .frame(width: 16)
+                    .frame(width: 14)
                 Text(String(localized: "Preset"))
-                    .font(.system(size: 12))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
                 Spacer(minLength: 2)
                 Picker("", selection: presetSelectionBinding) {
                     ForEach(presets, id: \.id) { p in
@@ -506,6 +557,16 @@ struct SettingsView: View {
                 .controlSize(.small)
                 .focusable(false)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.035))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
+                    )
+            )
         }
     }
 
@@ -569,13 +630,13 @@ struct SettingsView: View {
     // MARK: - Compact language picker (in a 2-column layout)
 
     private func compactLanguagePicker(icon: String, title: String, selection: Binding<String>) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
                 .foregroundColor(.blue)
-                .font(.system(size: 11))
-                .frame(width: 16)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 14)
             Text(title)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
             Spacer(minLength: 2)
             Picker("", selection: selection) {
@@ -591,11 +652,11 @@ struct SettingsView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(Color.blue.opacity(0.06))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.blue.opacity(0.15), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
                 )
         )
     }
@@ -719,24 +780,36 @@ struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .foregroundColor(color)
-                    .font(.system(size: 14, weight: .semibold))
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(color.opacity(0.12))
+                        .frame(width: 24, height: 24)
+                    Image(systemName: icon)
+                        .foregroundColor(color)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+
                 Text(title)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(.primary)
+
                 Spacer()
             }
+
             content()
         }
-        .padding(10)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(Color.white)
-                .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(Color.black.opacity(0.04), lineWidth: 0.5)
+                )
+                .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 1.5)
         )
     }
 }
@@ -752,18 +825,18 @@ struct CompactToggleStyle: ToggleStyle {
             Spacer()
             ZStack {
                 Capsule()
-                    .fill(configuration.isOn ? tint : Color.gray.opacity(0.25))
-                    .frame(width: 32, height: 17)
+                    .fill(configuration.isOn ? tint : Color(NSColor.separatorColor).opacity(0.35))
+                    .frame(width: 32, height: 18)
                 Circle()
                     .fill(Color.white)
-                    .frame(width: 13, height: 13)
-                    .shadow(color: Color.black.opacity(0.15), radius: 1, x: 0, y: 1)
+                    .frame(width: 14, height: 14)
+                    .shadow(color: Color.black.opacity(0.18), radius: 1.5, x: 0, y: 1)
                     .offset(x: configuration.isOn ? 7 : -7)
-                    .animation(.easeInOut(duration: 0.18), value: configuration.isOn)
+                    .animation(.spring(response: 0.22, dampingFraction: 0.8), value: configuration.isOn)
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
                     configuration.isOn.toggle()
                 }
             }

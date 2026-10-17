@@ -146,9 +146,9 @@ struct MapperSettingsView: View {
     private var header: some View {
         HStack(spacing: 12) {
             // Bidirectional language pair selector
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "globe")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.accentColor)
 
                 Picker("", selection: $fromLayout) {
@@ -160,8 +160,8 @@ struct MapperSettingsView: View {
                 .fixedSize()
 
                 Image(systemName: "arrow.left.and.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.8))
 
                 Picker("", selection: $toLayout) {
                     ForEach(layoutOptions, id: \.self) { l in
@@ -171,6 +171,16 @@ struct MapperSettingsView: View {
                 .labelsHidden()
                 .fixedSize()
             }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
+            )
 
             Spacer()
 
@@ -182,7 +192,7 @@ struct MapperSettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 340)
+            .frame(width: 320)
         }
     }
 

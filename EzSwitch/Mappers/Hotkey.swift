@@ -28,14 +28,19 @@ struct Hotkey: Codable, Equatable, Hashable {
 
     /// Human-readable label like "⌘⇧M". Falls back to key code for unknown keys.
     var displayLabel: String {
-        guard isSet else { return "—" }
+        displayTokens.joined()
+    }
+
+    /// List of individual key labels like `["⌘", "⇧", "M"]` for rendering as separate keycaps.
+    var displayTokens: [String] {
+        guard isSet else { return ["—"] }
         var parts: [String] = []
         if modifiers & Constants.ModifierMask.command != 0 { parts.append("⌘") }
         if modifiers & Constants.ModifierMask.shift   != 0 { parts.append("⇧") }
         if modifiers & Constants.ModifierMask.option  != 0 { parts.append("⌥") }
         if modifiers & Constants.ModifierMask.control != 0 { parts.append("⌃") }
         parts.append(Hotkey.keyName(for: keyCode))
-        return parts.joined()
+        return parts
     }
 
     /// CGEventFlags equivalent of `modifiers` for comparison in event taps.

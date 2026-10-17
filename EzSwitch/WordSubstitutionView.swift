@@ -194,25 +194,19 @@ struct WordSubstitutionView: View {
             Button {
                 showHotkeySheet = true
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "command")
-                        .font(.system(size: 9))
-                    Text(settings.wordRememberHotkey.displayLabel)
-                        .font(.system(size: 11, design: .monospaced))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                        )
-                )
+                KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .regular)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color(NSColor.controlBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                    )
             }
             .buttonStyle(.plain)
-            .controlSize(.small)
             .help(String(localized: "Change hotkey for remembering words"))
 
             Toggle(String(localized: "Auto-replace"), isOn: $settings.enableWordSubstitution)
@@ -263,9 +257,13 @@ struct WordSubstitutionView: View {
                 Text(String(localized: "No word substitutions for \(fromLayout) ↔ \(toLayout)"))
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
-                Text(String(localized: "Type a word in any app, then press \(settings.wordRememberHotkey.displayLabel) to remember it"))
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.7))
+                HStack(spacing: 4) {
+                    Text(String(localized: "Type a word in any app, then press"))
+                    KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .small)
+                    Text(String(localized: "to remember it"))
+                }
+                .font(.system(size: 11))
+                .foregroundColor(.secondary.opacity(0.7))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
