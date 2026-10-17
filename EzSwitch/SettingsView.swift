@@ -236,6 +236,7 @@ struct SettingsView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
+                                .focusable(false)
                             }
 
                             presetPickerView
@@ -267,6 +268,7 @@ struct SettingsView: View {
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+                                    .focusable(false)
                                     .help(String(localized: "Change hotkey for remembering words"))
                                 }
                                 Spacer()
@@ -286,6 +288,7 @@ struct SettingsView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
+                                .focusable(false)
                             }
                         }
                     }
