@@ -550,12 +550,22 @@ struct MapperEditorView: View {
                 Spacer(minLength: 0)
 
                 // Source → Target row, centered horizontally
-                HStack(spacing: 14) {
-                    Spacer()
-                    VStack(spacing: 2) {
+                VStack(spacing: 4) {
+                    HStack(spacing: 14) {
+                        Spacer()
                         Text(String(localized: "Source"))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .frame(width: 44)
+                        Color.clear
+                            .frame(width: 16, height: 1)
+                        Text(String(localized: "Target"))
+                            .frame(width: 80)
+                        Spacer()
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                    HStack(spacing: 14) {
+                        Spacer()
                         Text(lookupSource(for: key, modifier: editingModifier))
                             .font(.system(size: 22, weight: .bold, design: .rounded))
                             .frame(width: 44, height: 44)
@@ -567,14 +577,12 @@ struct MapperEditorView: View {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
                             )
-                    }
-                    Image(systemName: "arrow.right")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                    VStack(spacing: 2) {
-                        Text(String(localized: "Target"))
-                            .font(.caption2)
+
+                        Image(systemName: "arrow.right")
+                            .font(.body.weight(.semibold))
                             .foregroundColor(.secondary)
+                            .frame(width: 16)
+
                         TextField("", text: $pickerChar)
                             .textFieldStyle(.plain)
                             .font(.system(size: 22, weight: .bold, design: .rounded))
@@ -589,8 +597,9 @@ struct MapperEditorView: View {
                                     .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
                             )
                             .help(String(localized: "Type any character, emoji or symbol"))
+
+                        Spacer()
                     }
-                    Spacer()
                 }
 
                 // Suggestions with label
@@ -862,12 +871,22 @@ struct MapperEditorView: View {
             VStack(spacing: 8) {
                 Spacer(minLength: 0)
 
-                HStack(spacing: 14) {
-                    Spacer()
-                    VStack(spacing: 2) {
+                VStack(spacing: 4) {
+                    HStack(spacing: 14) {
+                        Spacer()
                         Text(String(localized: "Source"))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .frame(width: 90)
+                        Color.clear
+                            .frame(width: 16, height: 1)
+                        Text(String(localized: "Target"))
+                            .frame(width: 110)
+                        Spacer()
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                    HStack(spacing: 14) {
+                        Spacer()
                         TextField("?", text: mapping.source)
                             .textFieldStyle(.plain)
                             .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -886,14 +905,12 @@ struct MapperEditorView: View {
                                     mapping.modifier.wrappedValue = .shift
                                 }
                             }
-                    }
-                    Image(systemName: "arrow.right")
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(.secondary)
-                    VStack(spacing: 2) {
-                        Text(String(localized: "Target"))
-                            .font(.caption2)
+
+                        Image(systemName: "arrow.right")
+                            .font(.body.weight(.semibold))
                             .foregroundColor(.secondary)
+                            .frame(width: 16)
+
                         TextField("", text: mapping.target)
                             .textFieldStyle(.plain)
                             .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -908,8 +925,9 @@ struct MapperEditorView: View {
                                     .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
                             )
                             .help(String(localized: "Type any character, emoji or symbol"))
+
+                        Spacer()
                     }
-                    Spacer()
                 }
 
                 // Suggestions (based on source lookup if source is 1 char)
