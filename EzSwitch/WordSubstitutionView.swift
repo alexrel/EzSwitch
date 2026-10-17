@@ -337,6 +337,12 @@ private struct WordEntrySheet: View {
     @State private var source: String = ""
     @State private var target: String = ""
     @State private var bothWays: Bool = true
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case source
+        case target
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -363,8 +369,24 @@ private struct WordEntrySheet: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     TextField(String(localized: "e.g. ghbdtn or пше"), text: $source)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color(NSColor.textBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(
+                                    focusedField == .source
+                                        ? Color.accentColor.opacity(0.75)
+                                        : Color.primary.opacity(0.14),
+                                    lineWidth: focusedField == .source ? 1.5 : 1
+                                )
+                        )
+                        .focused($focusedField, equals: .source)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -378,8 +400,24 @@ private struct WordEntrySheet: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     TextField(String(localized: "e.g. привет or git"), text: $target)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color(NSColor.textBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(
+                                    focusedField == .target
+                                        ? Color.accentColor.opacity(0.75)
+                                        : Color.primary.opacity(0.14),
+                                    lineWidth: focusedField == .target ? 1.5 : 1
+                                )
+                        )
+                        .focused($focusedField, equals: .target)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -387,10 +425,10 @@ private struct WordEntrySheet: View {
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.accentColor.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
-                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
             )
 
             // Bidirectional toggle
@@ -407,12 +445,14 @@ private struct WordEntrySheet: View {
                     Button {
                         source = ""
                         target = ""
+                        focusedField = .source
                     } label: {
                         Label(String(localized: "Clear"), systemImage: "trash")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.red)
+                    .focusable(false)
 
                     Button {
                         autoTranslateSourceToTarget()
@@ -422,6 +462,7 @@ private struct WordEntrySheet: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(source.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .focusable(false)
                     .help(String(localized: "Auto-translate Source into Target using active layout mapping"))
                 }
 
@@ -434,6 +475,7 @@ private struct WordEntrySheet: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .keyboardShortcut(.cancelAction)
+                    .focusable(false)
 
                     Button {
                         onSave(
@@ -454,11 +496,14 @@ private struct WordEntrySheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .frame(width: 440)
+        .frame(width: 460)
         .onAppear {
             source = initialSource
             target = initialTarget
             bothWays = initialBothWays
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .source
+            }
         }
     }
 

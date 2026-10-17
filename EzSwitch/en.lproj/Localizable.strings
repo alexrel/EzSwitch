@@ -132,3 +132,7 @@
 "EzSwitch — Custom Rules (Mappers & Words)" = "EzSwitch — Custom Rules (Mappers & Words)";
 "Not set" = "Not set";
 "None" = "None";
+"Source (what you type)" = "Source (what you type)";
+"Target (replaced with)" = "Target (replaced with)";
+"e.g. ghbdtn or пше" = "e.g. ghbdtn or пше";
+"e.g. привет or git" = "e.g. привет or git";
