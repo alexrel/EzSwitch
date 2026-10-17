@@ -12,6 +12,7 @@ struct WordSubstitutionView: View {
         let source: String
         let target: String
         let isBidirectional: Bool
+        let switchLayout: Bool
         var id: String { source }
     }
 
@@ -58,13 +59,14 @@ struct WordSubstitutionView: View {
                 toLayout: toLayout,
                 initialSource: "",
                 initialTarget: "",
-                initialBothWays: true,
-                onSave: { source, target, bothWays in
+                initialBothWays: false,
+                initialSwitchLayout: true,
+                onSave: { source, target, bothWays, switchLayout in
                     let pair = LayoutPair(from: fromLayout, to: toLayout)
-                    wordStore.set(source: source, target: target, for: pair)
+                    wordStore.set(source: source, target: target, switchLayout: switchLayout, for: pair)
                     if bothWays {
                         let reverse = LayoutPair(from: toLayout, to: fromLayout)
-                        wordStore.set(source: target, target: source, for: reverse)
+                        wordStore.set(source: target, target: source, switchLayout: switchLayout, for: reverse)
                     }
                     showAddSheet = false
                 },
@@ -79,19 +81,20 @@ struct WordSubstitutionView: View {
                 initialSource: entry.source,
                 initialTarget: entry.target,
                 initialBothWays: entry.isBidirectional,
-                onSave: { newSource, newTarget, bothWays in
+                initialSwitchLayout: entry.switchLayout,
+                onSave: { newSource, newTarget, bothWays, switchLayout in
                     if let pair = currentPair {
                         if newSource != entry.source {
                             wordStore.remove(source: entry.source, for: pair)
                         }
-                        wordStore.set(source: newSource, target: newTarget, for: pair)
+                        wordStore.set(source: newSource, target: newTarget, switchLayout: switchLayout, for: pair)
 
                         let reverse = LayoutPair(from: toLayout, to: fromLayout)
                         if bothWays {
                             if newTarget != entry.target {
                                 wordStore.remove(source: entry.target, for: reverse)
                             }
-                            wordStore.set(source: newTarget, target: newSource, for: reverse)
+                            wordStore.set(source: newTarget, target: newSource, switchLayout: switchLayout, for: reverse)
                         } else if entry.isBidirectional {
                             wordStore.remove(source: entry.target, for: reverse)
                         }
@@ -161,7 +164,8 @@ struct WordSubstitutionView: View {
         let dict = wordStore.entries(for: pair)
         return dict.map { key, value in
             let isBi = dict[value] == key
-            return WordEntry(source: key, target: value, isBidirectional: isBi)
+            let shouldSwitch = wordStore.shouldSwitchLayout(for: key, pair: pair)
+            return WordEntry(source: key, target: value, isBidirectional: isBi, switchLayout: shouldSwitch)
         }
         .sorted { $0.source < $1.source }
     }
@@ -292,6 +296,7 @@ struct WordSubstitutionView: View {
                                 target: row.target,
                                 modifier: nil,
                                 isBidirectional: row.isBidirectional,
+                                switchLayout: row.switchLayout,
                                 sourceWidth: 90,
                                 onEdit: {
                                     editingEntry = row
@@ -331,12 +336,14 @@ private struct WordEntrySheet: View {
     let initialSource: String
     let initialTarget: String
     let initialBothWays: Bool
-    let onSave: (_ source: String, _ target: String, _ bothWays: Bool) -> Void
+    let initialSwitchLayout: Bool
+    let onSave: (_ source: String, _ target: String, _ bothWays: Bool, _ switchLayout: Bool) -> Void
     let onCancel: () -> Void
 
     @State private var source: String = ""
     @State private var target: String = ""
-    @State private var bothWays: Bool = true
+    @State private var bothWays: Bool = false
+    @State private var switchLayout: Bool = true
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -431,13 +438,17 @@ private struct WordEntrySheet: View {
                     .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
             )
 
-            // Bidirectional toggle
-            HStack {
+            // Options toggles
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(String(localized: "Switch keyboard layout to target language"), isOn: $switchLayout)
+                    .font(.system(size: 12, weight: .medium))
+                    .controlSize(.small)
+
                 Toggle(String(localized: "Save both ways (also adds the reverse)"), isOn: $bothWays)
                     .font(.system(size: 12))
                     .controlSize(.small)
-                Spacer()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Bottom action buttons (matching Map key & Extra sheets)
             HStack {
@@ -481,7 +492,8 @@ private struct WordEntrySheet: View {
                         onSave(
                             source.trimmingCharacters(in: .whitespaces),
                             target.trimmingCharacters(in: .whitespaces),
-                            bothWays
+                            bothWays,
+                            switchLayout
                         )
                     } label: {
                         Label(String(localized: "Save"), systemImage: "checkmark")
@@ -501,6 +513,7 @@ private struct WordEntrySheet: View {
             source = initialSource
             target = initialTarget
             bothWays = initialBothWays
+            switchLayout = initialSwitchLayout
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 focusedField = .source
             }

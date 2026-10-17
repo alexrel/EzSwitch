@@ -472,8 +472,9 @@ final class KeyboardManager {
 
         let wordLength = word.count
         let replacement = result.replacement
+        let targetLayout = result.targetLayout
 
-        print("✨ [WordSub] Auto-replacing \"\(word)\" → \"\(replacement)\"")
+        print("✨ [WordSub] Auto-replacing \"\(word)\" → \"\(replacement)\" (targetLayout: \(targetLayout ?? "none"))")
 
         // Perform deletion + paste asynchronously on main thread so the event tap
         // callback returns `nil` immediately (suppressing the separator key).
@@ -484,6 +485,12 @@ final class KeyboardManager {
                 separator: separator,
                 with: replacement
             )
+            if let target = targetLayout {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                    self?.currentLayoutID = target
+                    self?.switchToLayout(named: target)
+                }
+            }
         }
         return true
     }
@@ -491,8 +498,7 @@ final class KeyboardManager {
     /// Configurable hotkey handler. Saves the currently buffered word; if the
     /// buffer is empty, falls back to the user's selected text (via Cmd+C
     /// round-trip through the pasteboard). In both cases the typed or
-    /// selected word is also replaced in place — without switching the
-    /// keyboard layout.
+    /// selected word is also replaced in place and switches to the target layout.
     private func rememberCurrentWord() {
         let word = wordBuffer
         if !word.isEmpty {
@@ -512,6 +518,11 @@ final class KeyboardManager {
                         usleep(Constants.Timing.keySequenceDelayUs)
                         self.pasteText(other)
                         self.isReplacingWord = false
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                            self?.currentLayoutID = pair.to
+                            self?.switchToLayout(named: pair.to)
+                        }
                     }
                 }
             }
@@ -533,6 +544,11 @@ final class KeyboardManager {
                 self.isReplacingWord = true
                 self.pasteText(other)
                 self.isReplacingWord = false
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                    self?.currentLayoutID = pair.to
+                    self?.switchToLayout(named: pair.to)
+                }
             }
         }
     }
@@ -545,8 +561,8 @@ final class KeyboardManager {
             print("💡 [WordSub] Skipped remember '\(word)' — no character mapping available")
             return
         }
-        WordMapperStore.shared.set(source: word, target: other, for: pair)
-        print("💡 [WordSub] Saved '\(word)' → '\(other)' for pair \(pair.from)|\(pair.to)")
+        WordMapperStore.shared.set(source: word, target: other, switchLayout: true, for: pair)
+        print("💡 [WordSub] Saved '\(word)' → '\(other)' (switchLayout: true) for pair \(pair.from)|\(pair.to)")
     }
 
     /// The pair whose `from` is the current layout. If the current layout is

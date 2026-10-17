@@ -136,3 +136,5 @@
 "Target (replaced with)" = "Замена (на что меняется)";
 "e.g. ghbdtn or пше" = "напр. ghbdtn или пше";
 "e.g. привет or git" = "напр. привет или git";
+"Switch layout" = "Смена языка";
+"Switch keyboard layout to target language" = "Переключать раскладку на язык замены";

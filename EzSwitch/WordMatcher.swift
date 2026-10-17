@@ -6,6 +6,8 @@ struct WordMatchResult {
     let original: String
     /// The replacement string, with case restored to match `original`.
     let replacement: String
+    /// The target layout to switch to, if layout switching is enabled for this match.
+    var targetLayout: String? = nil
 }
 
 /// Two-stage matcher for word-level substitutions.

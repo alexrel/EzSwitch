@@ -1181,6 +1181,7 @@ struct MappingListRow: View {
     let target: String
     var modifier: KeyboardLayoutUtility.Modifier? = nil
     var isBidirectional: Bool = false
+    var switchLayout: Bool = false
     var sourceWidth: CGFloat? = nil
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -1227,6 +1228,22 @@ struct MappingListRow: View {
                         .lineLimit(1)
 
                     Spacer()
+
+                    if switchLayout {
+                        HStack(spacing: 3) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 8, weight: .bold))
+                            Text(String(localized: "Switch layout"))
+                                .font(.caption2.weight(.medium))
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.purple.opacity(0.12))
+                        )
+                    }
 
                     if isBidirectional {
                         HStack(spacing: 3) {
