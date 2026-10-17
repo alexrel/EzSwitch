@@ -26,9 +26,15 @@
 - The modifier family (**Command** or **Option**) is selectable from the **Key** dropdown
 - **Order-independent language pair**: swapping Left and Right languages keeps the exact same active preset, character mappings, and word substitutions
 
-### Text Transformation
+### Text Transformation & Multi-Language Cycling
 - Double-tap **Shift** (or **Option**) to transform selected text or the last typed word between keyboard layouts
 - Automatically detects the source language of the text and converts it to the opposite layout in your pair (`ghbdtn` ↔ `привет`)
+- **Multi-Language Pivot & Cycling (3+ layouts, e.g. Hebrew, Spanish, etc.)**:
+  - When typing in a 3rd layout (e.g. Hebrew), Double Shift intelligently cycles through your primary switcher layouts (`Russian`, `English`) using presets and layout history:
+    - **1st press**: transforms to the layout you just came from (`previousLayout`, e.g. `Hebrew → Russian`)
+    - **2nd press** (within 2.5s): transforms to the other primary layout (e.g. `Russian → English`, via direct or bridge mapping)
+    - **3rd press** (within 2.5s): reverts back to the original text and layout (Undo)
+  - Other unrelated languages (e.g. Spanish) never interfere unless actively typed
 - Supports various trigger combinations:
   - Double Left / Right Shift
   - Double Left / Right Option
@@ -52,11 +58,11 @@
 - Presets are stored in `~/Library/Application Support/EzSwitch/presets.json`
 
 ### Smart Word Substitutions (`Word Substitutions`)
-- **Automatic word-level replacement** — teach EzSwitch words that you frequently mistype in the wrong layout (e.g. `пше → git`, `да ↔ lf`); as soon as you type a word (2+ characters) followed by Space, Enter, Tab, or punctuation, it is replaced in place
+- **Automatic word-level replacement** — teach EzSwitch words that you frequently mistype in the wrong layout (e.g. `ghbdtn → привет`, `пше → git`); as soon as you type a word (2+ characters) followed by Space, Enter, Tab, or punctuation, it is replaced in place
+- **Target layout auto-switching** — each word substitution has an optional *"Switch keyboard layout to target language"* (`🌐 Switch layout`) toggle: when triggered, EzSwitch seamlessly changes macOS system input source to the target layout right after replacing the word, so you can keep typing without manual layout switching
 - **Case preservation** — `ПШЕ` → `GIT`, `Пше` → `Git`, `пше` → `git`
-- **Configurable Remember Hotkey** (default **⌘⇧M**) — type a word (or select an existing word) in any app and press the hotkey: EzSwitch converts the word in place **and** saves the substitution to your dictionary
-- **Save both ways** — both the **Add Word** and **Edit Word** dialogs include a *"Save both ways (also adds/updates the reverse)"* toggle so bidirectional pairs stay in sync
-- **Layout stays put** — replacements are delivered via the clipboard without changing your active keyboard layout
+- **Configurable Remember Hotkey** (default **⌘⌥M**) — type a word (or select an existing word) in any app and press the hotkey: EzSwitch converts the word in place **and** saves the substitution to your dictionary
+- **Clear one-way mappings** — substitutions are strictly directional (`Source → Target`), avoiding accidental reverse-corruption of legitimate words; reverse rules can simply be added as separate entries if needed
 - **Unified per-pair list** — all word substitutions for `Russian – PC ↔ ABC` live in a single unified table regardless of Left/Right Command order
 - Stored in `~/Library/Application Support/EzSwitch/word_mappings.json`
 
@@ -193,9 +199,9 @@ To grant permissions:
 ### Configuring Word Substitutions (`Word Substitutions`)
 
 1. Switch to the **Word Substitutions** tab in the Mappers window
-2. **Quick training via Hotkey**: type a word in any app (e.g. `пше`) or select a word, then press **⌘⇧M** (customizable by clicking the hotkey badge in the header). EzSwitch replaces the word with `git` in place and saves `пше → git` to your list
-3. **Manual entry**: click **+ Add** to add a custom word pair. Enable **Save both ways** to automatically save the reverse direction as well
-4. **Editing & Deleting**: click **Edit** (or double-click any row) to modify the source/target word or toggle **Save both ways**; click `✕` to delete an entry
+2. **Quick training via Hotkey**: type a word in any app (e.g. `пше`) or select a word, then press **⌘⌥M** (customizable by clicking the hotkey badge in the header). EzSwitch replaces the word with `git` in place and saves `пше → git` to your list
+3. **Manual entry**: click **+ Add** to add a custom word pair. Check **Switch keyboard layout to target language** (`🌐 Switch layout`) if you want the system keyboard layout to automatically switch to the target language upon replacement
+4. **Editing & Deleting**: click **Edit** (or double-click any row) to modify the source/target word or toggle layout switching; click `✕` to delete an entry
 
 ## Architecture
 
@@ -203,14 +209,14 @@ The application is written in Swift & SwiftUI (`EzSwitch/*.swift`):
 
 - **`AppDelegate`**: Application lifecycle, accessory activation policy (menu bar only), and initial permission checks
 - **`StatusBarController`**: Manages the `NSStatusItem` and transient `NSPopover` hosting `SettingsView`
-- **`KeyboardManager`**: Monitors global key events via `CGEvent.tapCreate`, tracks single modifier taps, double-tap transform triggers, and live word buffering (`UCKeyTranslate` key-code translation) for automatic word substitutions
-- **`TextTransformer`**: Transforms selected text or the last word before the cursor using the active `LayoutMapperPreset` (auto-detecting direction and rebuilding reverse mappings via longest-match)
+- **`KeyboardManager`**: Monitors global key events via `CGEvent.tapCreate`, tracks single modifier taps, double-tap transform triggers, system layout changes (`kTISNotifySelectedKeyboardInputSourceChanged` for `previousLayout` tracking), and live word buffering for automatic substitutions
+- **`TextTransformer`**: Transforms selected text or the last word before the cursor; features **Multi-Language Pivot & Cycling** with `previousLayout` priority and consecutive double-tap cycling across multiple layouts (with Undo on 3rd press)
 - **`ClipboardManager`**: Preserves and restores the system `NSPasteboard` around synthetic `⌘C` / `⌘V` operations
 - **`SettingsManager`**: Persists user settings in `UserDefaults`, including order-independent active preset selection (`selectedPresetId(for:_:)`)
 - **`AppConfigRegistry`**: Per-application word selection shortcuts (`⌥⇧←` vs `⌃⇧←`) with bundle ID and keyword matching
 - **`MapperStore`**: Thread-safe JSON store (`presets.json`) for `LayoutMapperPreset` models with bidirectional pair matching and first-launch auto-seeding
-- **`WordMapperStore` & `WordMatcher`**: Unified per-pair JSON store (`word_mappings.json`) and case-preserving matcher for word-level substitutions
-- **`MapperSettingsView` / `MapperEditorView` / `WordSubstitutionView`**: Unified SwiftUI mapper window with tactile dual-legend keyboard keycaps and word substitution table
+- **`WordMapperStore` & `WordMatcher`**: Unified per-pair JSON store (`word_mappings.json`) and case-preserving matcher for word-level substitutions with per-word target layout switching
+- **`MapperSettingsView` / `MapperEditorView` / `WordSubstitutionView`**: Unified SwiftUI mapper window with tactile dual-legend keyboard keycaps, persistent layout pair selection, and modern word substitution management
 - **`Constants`**: Centralized constants for key codes, modifier masks, timing intervals, UserDefaults keys, and minimum word replacement length (`Constants.WordSub.minAutoReplaceLength`)
 
 ## Building & Distribution
