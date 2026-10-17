@@ -238,6 +238,26 @@ final class AppConfigRegistry {
             displayName: "Obsidian",
             method: .ctrlShiftLeft
         ),
+        AppWordSelectionConfig(
+            bundleId: "com.todesktop.230313mzl4w4u92",
+            displayName: "Cursor",
+            method: .ctrlShiftLeft
+        ),
+        AppWordSelectionConfig(
+            bundleId: "dev.zed.Zed",
+            displayName: "Zed",
+            method: .ctrlShiftLeft
+        ),
+    ]
+
+    /// Keywords in bundleId or app name that identify IDEs / code editors where
+    /// Option+Shift+Left may select lines/blocks or duplicate lines, so
+    /// Ctrl+Shift+Left is used instead.
+    private let ctrlShiftKeywords: [String] = [
+        "jetbrains", "phpstorm", "intellij", "webstorm", "pycharm", "clion",
+        "goland", "rubymine", "rider", "datagrip", "appcode", "rustrover",
+        "fleet", "androidstudio", "sublime", "vscode", "vscodium",
+        "cursor", "windsurf", "codeium", "antigravity", "atom", "obsidian", "zed"
     ]
 
     /// Index for fast lookup by bundleId
@@ -257,11 +277,22 @@ final class AppConfigRegistry {
         return configIndex[bundleId.lowercased()]
     }
 
-    /// Get selection method for an application
+    /// Get selection method for an application (checks exact bundleId, then
+    /// universal keyword heuristics on bundleId and app display name).
     func wordSelectionMethod(for bundleId: String?) -> WordSelectionMethod {
         if let config = config(for: bundleId) {
             return config.wordSelectionMethod
         }
+
+        let lowerBundle = (bundleId ?? "").lowercased()
+        let lowerAppName = (NSWorkspace.shared.frontmostApplication?.localizedName ?? "").lowercased()
+
+        for keyword in ctrlShiftKeywords {
+            if lowerBundle.contains(keyword) || lowerAppName.contains(keyword) {
+                return .ctrlShiftLeft
+            }
+        }
+
         return defaultMethod
     }
 

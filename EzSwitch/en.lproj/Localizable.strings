@@ -99,3 +99,35 @@
 /* Sections */
 "No modifier (base)" = "No modifier (base)";
 "With Shift held" = "With Shift held";
+
+/* Word Substitutions */
+"Word Substitutions" = "Word Substitutions";
+"Add Word Substitution" = "Add Word Substitution";
+"Edit Word Substitution" = "Edit Word Substitution";
+"Direction:" = "Direction:";
+"Source (typed in):" = "Source (typed in):";
+"Target (replaced with):" = "Target (replaced with):";
+"Save both ways (also adds the reverse)" = "Save both ways (also adds the reverse)";
+"e.g. пше" = "e.g. пше";
+"e.g. git" = "e.g. git";
+"e.g. lf" = "e.g. lf";
+"e.g. да" = "e.g. да";
+"Auto-replace" = "Auto-replace";
+"Swap From and To layouts" = "Swap From and To layouts";
+"Character Mappings" = "Character Mappings";
+"words" = "words";
+"Click any key to edit" = "Click any key to edit";
+"Clear test text" = "Clear test text";
+"Overwrite current mapping with auto-generated keys?" = "Overwrite current mapping with auto-generated keys?";
+"Clear all mapped keys in this preset?" = "Clear all mapped keys in this preset?";
+"Clear keys" = "Clear keys";
+"Clear all keys…" = "Clear all keys…";
+"Delete preset…" = "Delete preset…";
+"Preset actions" = "Preset actions";
+"Create a new preset" = "Create a new preset";
+"Fill keys automatically from system layouts" = "Fill keys automatically from system layouts";
+"Quick remember:" = "Quick remember:";
+"No words saved yet" = "No words saved yet";
+"%d words for current pair" = "%d words for current pair";
+"EzSwitch — Custom Rules (Mappers & Words)" = "EzSwitch — Custom Rules (Mappers & Words)";
+

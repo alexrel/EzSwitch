@@ -42,12 +42,23 @@ enum Constants {
         static let leftCmd:    Int = 55
         static let rightCmd:   Int = 54
 
-        // Common editing keys
+        // Common editing & navigation keys
         static let delete:     Int = 51         // kVK_Delete (backspace)
+        static let forwardDelete: Int = 117     // kVK_ForwardDelete
+        static let escape:     Int = 53         // kVK_Escape
+        static let tab:        Int = 48         // kVK_Tab
+        static let returnKey:  Int = 36         // kVK_Return
+        static let space:      Int = 49         // kVK_Space
         static let c:          Int = kVK_ANSI_C
         static let v:          Int = kVK_ANSI_V
-        static let leftArrow:  Int = 0x7B
-        static let rightArrow: Int = 0x7C
+        static let leftArrow:  Int = 0x7B       // 123
+        static let rightArrow: Int = 0x7C       // 124
+        static let downArrow:  Int = 0x7D       // 125
+        static let upArrow:    Int = 0x7E       // 126
+        static let home:       Int = 0x73       // 115
+        static let end:        Int = 0x77       // 119
+        static let pageUp:     Int = 0x74       // 116
+        static let pageDown:   Int = 0x79       // 121
     }
 
     // MARK: - Timings
@@ -83,8 +94,9 @@ enum Constants {
     // MARK: - Word Sub
     enum WordSub {
         /// Minimum typed-word length that triggers an auto-replace.
-        /// (Hotkey-based "remember" has no minimum — user can save any word.)
-        static let minAutoReplaceLength = 3
+        /// Set to 2 so 2-letter words (e.g. "lf" → "да") and 3+ letter words ("пше" → "git") both work.
+        /// Change to 3 if you only want 3+ letter words to trigger auto-replace.
+        static let minAutoReplaceLength = 2
 
         static let pairKeySeparator = "|"
 
@@ -95,6 +107,7 @@ enum Constants {
 
     // MARK: - Default Settings
     enum Default {
+        static let noneLanguage  = "None"
         static let leftLanguage  = "Russian – PC"
         static let rightLanguage = "ABC"
         static let switchModifierRaw    = "cmd"

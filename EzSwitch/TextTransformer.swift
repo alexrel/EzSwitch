@@ -27,7 +27,7 @@ final class TextTransformer {
 
         let left = settings.leftCommandLanguage
         let right = settings.rightCommandLanguage
-        guard left != "None", right != "None" else {
+        guard left != Constants.Default.noneLanguage, right != Constants.Default.noneLanguage else {
             self.mappers = fresh
             return
         }
@@ -38,13 +38,12 @@ final class TextTransformer {
             return
         }
 
-        let key = Constants.WordSub.pairKey(from: left, to: right)
-        let active = settings.selectedPresetIds[key]
+        let active = settings.selectedPresetId(for: left, right)
             .flatMap { id in presets.first(where: { $0.id == id }) }
             ?? presets.first
 
         if let active = active {
-            fresh[LayoutPair(from: left, to: right)] = active.characterMapping()
+            fresh[active.pair] = active.characterMapping()
         }
 
         self.mappers = fresh
@@ -85,8 +84,8 @@ final class TextTransformer {
 
     // MARK: - Timings (tuned for reliability)
 
-    private let copyTimeoutMs: Int = 350
-    private let copyPollStepUs: useconds_t = 3_000
+    private let copyTimeoutMs: Int = Int(Constants.Timing.captureTimeoutSec * 1000)
+    private let copyPollStepUs: useconds_t = Constants.Timing.capturePollStepUs
     private let keyDownUpDelayUs: useconds_t = Constants.Timing.keyDownUpDelayUs
     private let keySequenceDelayUs: useconds_t = Constants.Timing.keySequenceDelayUs
     private let pasteSettleUs: useconds_t = Constants.Timing.pasteSettleUs
@@ -489,36 +488,57 @@ final class TextTransformer {
 
     /// Transforms text, auto-detecting direction based on text content
     private func doTransform(_ text: String, fromRussian: Bool) -> String {
-        // Auto-detect based on text content, not keyboard layout
         let actuallyRussian = textIsRussian(text)
 
-        // Get source and target layouts from Command Switch settings
         let settings = SettingsManager.shared
         let left = settings.leftCommandLanguage
         let right = settings.rightCommandLanguage
-        let fromLayout = actuallyRussian ? left : right
 
         ensureMappersLoaded()
-        let activeKey = LayoutPair(from: left, to: right)
-        let activeMap = mappers[activeKey]
-
-        // No active preset at all — nothing we can do
-        guard let activeMap = activeMap, !activeMap.isEmpty else {
-            print("⚠️ [Transform] No active mapper for \(left) → \(right)")
-            print("🔤 [Transform] Available pairs: \(availablePairs().map { "\($0.from) → \($0.to)" })")
+        guard let (activePair, activeMap) = mappers.first, !activeMap.isEmpty else {
+            print("⚠️ [Transform] No active mapper for \(left) ↔ \(right)")
             return text
         }
 
-        if fromLayout == left {
-            // Forward: source key in the active direction
-            print("🔤 [Transform] Forward: \(left) → \(right)")
+        let useForward = shouldTransformForward(
+            text: text,
+            actuallyRussian: actuallyRussian,
+            pair: activePair,
+            mapper: activeMap
+        )
+
+        if useForward {
+            print("🔤 [Transform] Forward: \(activePair.from) → \(activePair.to)")
             return applyForward(text, mapper: activeMap)
         } else {
-            // Reverse: invert the active mapping (longest-match handles
-            // multi-character forward values correctly)
-            print("🔤 [Transform] Reverse: \(right) → \(left)")
+            print("🔤 [Transform] Reverse: \(activePair.to) → \(activePair.from)")
             return applyReverse(text, forward: activeMap)
         }
+    }
+
+    /// Determines whether `text` is written in `pair.from` (forward) or `pair.to` (reverse).
+    private func shouldTransformForward(
+        text: String,
+        actuallyRussian: Bool,
+        pair: LayoutPair,
+        mapper: [Character: String]
+    ) -> Bool {
+        let fromIsRussian = pair.from.lowercased().contains("russian")
+        let toIsRussian = pair.to.lowercased().contains("russian")
+        if fromIsRussian != toIsRussian {
+            return fromIsRussian ? actuallyRussian : !actuallyRussian
+        }
+
+        var forwardHits = 0
+        var reverseHits = 0
+        let reverseValues = Set(mapper.values.compactMap { $0.count == 1 ? $0.first : nil })
+        for ch in text {
+            let inForward = mapper[ch] != nil && mapper[ch] != String(ch)
+            let inReverse = reverseValues.contains(ch)
+            if inForward && !inReverse { forwardHits += 1 }
+            if inReverse && !inForward { reverseHits += 1 }
+        }
+        return forwardHits >= reverseHits
     }
 
     /// Apply a forward `[Character: String]` mapping character by character.
@@ -536,21 +556,6 @@ final class TextTransformer {
     }
 
     /// Apply the inverse of a forward `[Character: String]` mapping.
-    ///
-    /// For each source key `k → v` in `forward`:
-    ///   - single-char `v` (e.g. `й → "j"`) goes into a char-level map
-    ///   - multi-char `v` (e.g. `ц → "tz"`, `я → "ja"`) goes into a
-    ///     pattern list
-    ///
-    /// Patterns are matched longest-first at every position. Single-char
-    /// fallbacks only apply to characters that are NOT the first character
-    /// of any multi-char pattern — this prevents `"j"` in `"ja"` from
-    /// hijacking the multi-char match.
-    ///
-    /// Collisions on the single-char level (e.g. both `е → "e"` and
-    /// `э → "e"` — two different source keys mapping to the same target
-    /// value) are inherently ambiguous and cannot be resolved by any
-    /// automatic inversion. The first such pair wins.
     private func applyReverse(_ text: String, forward: [Character: String]) -> String {
         var multiPatterns: [(String, String)] = []
         var charMap: [Character: String] = [:]
@@ -562,13 +567,10 @@ final class TextTransformer {
                 multiPatterns.append((v, String(k)))
             }
         }
-        // Remove single-char mappings whose first char starts a multi-char
-        // pattern — the multi-char match always wins.
         let multiStarts: Set<Character> = Set(multiPatterns.map { $0.0.first! })
         for c in multiStarts {
             charMap.removeValue(forKey: c)
         }
-        // Longest pattern first, so `"ja"` is tried before `"j"`.
         multiPatterns.sort { $0.0.count > $1.0.count }
 
         var result = ""
@@ -640,19 +642,24 @@ final class TextTransformer {
         return id.lowercased().contains("russian")
     }
 
-    /// Returns target layout name based on text language (what the text WAS before transform)
+    /// Returns target layout name based on text language (what the text WAS before transform),
+    /// independent of whether Russian is assigned to Left or Right Command.
     private func resolveTargetLayoutName(textWasRussian: Bool) -> String? {
         let settings = SettingsManager.shared
+        let candidates = [settings.leftCommandLanguage, settings.rightCommandLanguage]
+            .filter { $0 != Constants.Default.noneLanguage && !$0.isEmpty }
 
         if textWasRussian {
-            // Text was Russian -> transformed to English -> switch to English layout
-            let candidate = settings.rightCommandLanguage
-            if candidate != "None" { return candidate }
-            return "ABC"
+            // Text was Russian -> transformed to non-Russian layout
+            if let nonRussian = candidates.first(where: { !$0.lowercased().contains("russian") }) {
+                return nonRussian
+            }
+            return Constants.Default.rightLanguage
         } else {
-            // Text was English -> transformed to Russian -> switch to Russian layout
-            let candidate = settings.leftCommandLanguage
-            if candidate != "None" { return candidate }
+            // Text was non-Russian -> transformed to Russian layout
+            if let russian = candidates.first(where: { $0.lowercased().contains("russian") }) {
+                return russian
+            }
 
             let sources = TISCreateInputSourceList(nil, false).takeRetainedValue() as! [TISInputSource]
             for s in sources {

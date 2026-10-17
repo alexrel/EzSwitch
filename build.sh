@@ -26,7 +26,15 @@ set -eo pipefail
 
 APP_NAME="EzSwitch"
 SCHEME="EzSwitch"
-VERSION="1.0"
+
+# Single source of truth for Marketing Version: project Info.plist (unless overridden via VERSION=...)
+if [ -z "${VERSION:-}" ]; then
+    VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" EzSwitch/Info.plist 2>/dev/null || echo "1.1.0")
+fi
+
+# Automatically compute build number & git commit hash from git
+BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
 BUILD_DIR="build"
 DERIVED_DATA="DerivedData"
@@ -114,68 +122,94 @@ build_app() {
     SIGN_IDENTITY="-"
     SIGN_IDENTITY="$(resolve_signing_identity)"
 
-    log "${YELLOW}🧹 Cleaning...${NC}"
-    rm -rf "$BUILD_DIR/" "$DERIVED_DATA/"
-    mkdir -p "$BUILD_DIR"
-    log "${GREEN}✅ Cleaned${NC}\n"
+    log "${YELLOW}🧹 Preparing build directory...${NC}"
+    rm -rf "$BUILD_DIR/"
+    mkdir -p "$EXPORT_DIR"
+    log "${GREEN}✅ Ready${NC}\n"
 
     log "${YELLOW}🔍 Finding Xcode project...${NC}"
     # shellcheck disable=SC2207
     local XCODE_ARGS=($(find_xcode_container))
     log "${GREEN}✅ Found: ${XCODE_ARGS[*]}${NC}\n"
 
-    log "${YELLOW}📦 Creating Archive (signed with: $SIGN_IDENTITY)…${NC}"
-    xcodebuild archive \
+    log "${YELLOW}📦 Building Release app (signed with: $SIGN_IDENTITY)…${NC}"
+    if xcodebuild build \
         "${XCODE_ARGS[@]}" \
         -scheme "$SCHEME" \
         -configuration Release \
-        -archivePath "$ARCHIVE_PATH" \
         -derivedDataPath "$DERIVED_DATA" \
+        MARKETING_VERSION="$VERSION" \
+        CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
         CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
         CODE_SIGN_STYLE=Manual \
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS=NO \
         OTHER_CODE_SIGN_FLAGS="--options=runtime --timestamp=none" \
-        -quiet
+        -quiet 2>/dev/null && [ -f "$DERIVED_DATA/Build/Products/Release/$APP_NAME.app/Contents/MacOS/$APP_NAME" ]; then
+        cp -R "$DERIVED_DATA/Build/Products/Release/$APP_NAME.app" "$EXPORT_DIR/$APP_NAME.app"
+    else
+        log "${YELLOW}⚡ Compiling Release binary via swiftc…${NC}"
+        if [ -d "./$APP_NAME.app" ]; then
+            cp -R "./$APP_NAME.app" "$EXPORT_DIR/$APP_NAME.app"
+        else
+            mkdir -p "$EXPORT_DIR/$APP_NAME.app/Contents/MacOS" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources"
+            cp "EzSwitch/Info.plist" "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
+        fi
+        cp -R "EzSwitch/en.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
+        cp -R "EzSwitch/ru.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
+        swiftc \
+            -module-cache-path "$DERIVED_DATA/ModuleCache.noindex" \
+            -sdk "$(xcrun --show-sdk-path)" \
+            -target arm64-apple-macosx14.0 \
+            -O \
+            -module-name "$APP_NAME" \
+            EzSwitch/*.swift EzSwitch/Mappers/*.swift \
+            -o "$EXPORT_DIR/$APP_NAME.app/Contents/MacOS/$APP_NAME"
+    fi
 
-    [ -d "$ARCHIVE_PATH" ] || { log "${RED}❌ Archive not created${NC}"; exit 1; }
-    log "${GREEN}✅ Archive created${NC}\n"
+    [ -d "$EXPORT_DIR/$APP_NAME.app" ] || { log "${RED}❌ Build failed${NC}"; exit 1; }
+    log "${GREEN}✅ Application built: $EXPORT_DIR/$APP_NAME.app${NC}\n"
 
-    log "${YELLOW}📤 Exporting application...${NC}"
-    cat > "$EXPORT_OPTIONS" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key>
-  <string>mac-application</string>
-  <key>stripSwiftSymbols</key>
-  <true/>
-  <key>signingStyle</key>
-  <string>manual</string>
-  <key>signingCertificate</key>
-  <string>$SIGN_IDENTITY</string>
-</dict>
-</plist>
-EOF
+    # Inject version metadata into the app bundle Info.plist before signing
+    local app_plist="$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
+    if [ -f "$app_plist" ]; then
+        log "${YELLOW}🏷  Version metadata: v$VERSION (build $BUILD_NUMBER · $GIT_HASH)${NC}"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$app_plist" 2>/dev/null || \
+        /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$app_plist" 2>/dev/null || true
 
-    xcodebuild -exportArchive \
-        -archivePath "$ARCHIVE_PATH" \
-        -exportPath "$EXPORT_DIR" \
-        -exportOptionsPlist "$EXPORT_OPTIONS" \
-        CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
-        -quiet
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$app_plist" 2>/dev/null || \
+        /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD_NUMBER" "$app_plist" 2>/dev/null || true
 
-    [ -d "$EXPORT_DIR/$APP_NAME.app" ] || { log "${RED}❌ Export failed${NC}"; exit 1; }
-    log "${GREEN}✅ Application exported: $EXPORT_DIR/$APP_NAME.app${NC}\n"
+        /usr/libexec/PlistBuddy -c "Set :GitCommitHash $GIT_HASH" "$app_plist" 2>/dev/null || \
+        /usr/libexec/PlistBuddy -c "Add :GitCommitHash string $GIT_HASH" "$app_plist" 2>/dev/null || true
+    fi
 
-    # Re-sign the exported app with our chosen identity to guarantee consistency
+    # Re-sign the exported app with our chosen identity so every build has a
+    # consistent Designated Requirement (not a per-build CDHash).
     log "${YELLOW}🔏 Re-signing exported app…${NC}"
-    codesign --force --deep \
-        --sign "$SIGN_IDENTITY" \
-        --entitlements EzSwitch/EzSwitch.entitlements \
-        --options runtime \
-        --timestamp=none \
-        "$EXPORT_DIR/$APP_NAME.app" 2>&1 | sed 's/^/   /'
+    if [ "$SIGN_IDENTITY" = "-" ]; then
+        codesign --force --deep \
+            --sign "$SIGN_IDENTITY" \
+            --identifier "alexrel.EzSwitch" \
+            --entitlements EzSwitch/EzSwitch.entitlements \
+            --options runtime \
+            --timestamp=none \
+            -r='designated => identifier "alexrel.EzSwitch"' \
+            "$EXPORT_DIR/$APP_NAME.app" 2>&1 | sed 's/^/   /'
+    else
+        codesign --force --deep \
+            --sign "$SIGN_IDENTITY" \
+            --entitlements EzSwitch/EzSwitch.entitlements \
+            --options runtime \
+            --timestamp=none \
+            "$EXPORT_DIR/$APP_NAME.app" 2>&1 | sed 's/^/   /'
+    fi
+
+    # Keep root ./EzSwitch.app in sync if present
+    if [ -d "./$APP_NAME.app" ]; then
+        rm -rf "./$APP_NAME.app"
+        cp -R "$EXPORT_DIR/$APP_NAME.app" "./$APP_NAME.app"
+    fi
 
     log "${GREEN}✅ Stable signature applied${NC}\n"
 }
@@ -208,6 +242,28 @@ build_dmg() {
     mkdir -p "$staging"
 
     cp -R "$app_path" "$staging/"
+
+    # Always sign the DMG / Portable copy with a universal ad-hoc signature (-)
+    # so it is not tied to any local Apple Development Team ID and can be opened
+    # on any other Mac (or uploaded to GitHub Releases).
+    log "${YELLOW}🌍 Signing DMG app with portable universal signature (for other Macs / GitHub)…${NC}"
+    codesign --force --deep \
+        --sign "-" \
+        --identifier "alexrel.EzSwitch" \
+        --entitlements EzSwitch/EzSwitch.entitlements \
+        --options runtime \
+        --timestamp=none \
+        -r='designated => identifier "alexrel.EzSwitch"' \
+        "$staging/$APP_NAME.app" 2>&1 | sed 's/^/   /'
+
+    mkdir -p "$BUILD_DIR/Portable"
+    if [ "$app_path" != "$BUILD_DIR/Portable/$APP_NAME.app" ]; then
+        rm -rf "$BUILD_DIR/Portable/$APP_NAME.app"
+        cp -R "$staging/$APP_NAME.app" "$BUILD_DIR/Portable/$APP_NAME.app"
+    fi
+    rm -f "$BUILD_DIR/${APP_NAME}-Portable.zip"
+    ditto -c -k --sequesterRsrc --keepParent "$BUILD_DIR/Portable/$APP_NAME.app" "$BUILD_DIR/${APP_NAME}-Portable.zip"
+
     ln -s /Applications "$staging/Applications"
 
     dmg_temp="$temp_dir/EzSwitch-temp.dmg"
@@ -291,11 +347,18 @@ EOF
 }
 
 log "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-log "${BLUE}🚀 Build $APP_NAME (mode: $MODE)${NC}"
+log "${BLUE}🚀 Build $APP_NAME (mode: $MODE, v$VERSION, build $BUILD_NUMBER · $GIT_HASH)${NC}"
 log "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
 case "$MODE" in
     all)
+        build_app
+        build_dmg
+        ;;
+    release)
+        # Portable build for distribution to other Macs / GitHub Releases:
+        # uses universal ad-hoc signature + Hardened Runtime + stable Designated Requirement
+        export CODESIGN_IDENTITY="-"
         build_app
         build_dmg
         ;;
@@ -311,9 +374,9 @@ case "$MODE" in
         ;;
     *)
         echo "Usage:"
-        echo "  ./build.sh            # all"
-        echo "  ./build.sh all"
-        echo "  ./build.sh app"
+        echo "  ./build.sh            # build app + DMG"
+        echo "  ./build.sh release    # portable DMG for other Macs / GitHub"
+        echo "  ./build.sh app        # build app only"
         echo "  ./build.sh dmg [path/to/EzSwitch.app]"
         echo ""
         echo "Optional environment variables:"
@@ -326,10 +389,19 @@ log "${BLUE}━━━━━━━━━━━━━━━━━━━━━━�
 log "${GREEN}✅ Done${NC}"
 log "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 echo "📁 Artifacts:"
-echo "  • App: $EXPORT_DIR/$APP_NAME.app"
+echo "  • Local App (сохраняет разрешения при пересборке): $EXPORT_DIR/$APP_NAME.app"
+if [ -d "$BUILD_DIR/Portable/$APP_NAME.app" ]; then
+    echo "  • Portable App (для других Маков / GitHub):       $BUILD_DIR/Portable/$APP_NAME.app"
+fi
 if [ -f "$DMG_PATH" ]; then
-    echo "  • DMG: $DMG_PATH"
+    echo "  • Portable DMG (для других Маков / GitHub):       $DMG_PATH"
 fi
 echo ""
-echo "💡 Tip: To use a stable signing identity across builds, run once:"
-echo "     ./scripts/setup_dev_signing.sh"
+echo "🖥  Установка на другом Маке (из DMG или GitHub):"
+echo "  1. Перетащите EzSwitch.app в папку /Applications"
+echo "  2. При первом запуске (если macOS заблокирует запуск):"
+echo "     • Системные настройки → Конфиденциальность и безопасность → нажать «Подтвердить вход» («Open Anyway»)"
+echo "     • Либо в Терминале: xattr -cr /Applications/EzSwitch.app"
+echo "  3. Выдайте разрешения в Системные настройки → Конфиденциальность и безопасность:"
+echo "     • Мониторинг ввода (Input Monitoring)"
+echo "     • Универсальный доступ (Accessibility)"

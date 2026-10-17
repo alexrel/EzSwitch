@@ -174,6 +174,27 @@ final class SettingsManager: ObservableObject {
         }
     }
 
+    /// Order-independent lookup of the selected preset ID for a language pair.
+    /// Returns the same preset ID whether `(a, b)` is `(Russian – PC, ABC)` or `(ABC, Russian – PC)`.
+    func selectedPresetId(for a: String, _ b: String) -> String? {
+        let direct = Constants.WordSub.pairKey(from: a, to: b)
+        let inverse = Constants.WordSub.pairKey(from: b, to: a)
+        return selectedPresetIds[direct] ?? selectedPresetIds[inverse]
+    }
+
+    /// Order-independent setter for the selected preset ID of a language pair.
+    func setSelectedPresetId(_ id: String?, for a: String, _ b: String) {
+        let direct = Constants.WordSub.pairKey(from: a, to: b)
+        let inverse = Constants.WordSub.pairKey(from: b, to: a)
+        if let id = id {
+            selectedPresetIds[direct] = id
+            selectedPresetIds[inverse] = id
+        } else {
+            selectedPresetIds.removeValue(forKey: direct)
+            selectedPresetIds.removeValue(forKey: inverse)
+        }
+    }
+
     private init() {
         self.leftCommandLanguage = defaults.string(forKey: Constants.DefaultsKey.leftCommandLanguage) ?? Constants.Default.leftLanguage
         self.rightCommandLanguage = defaults.string(forKey: Constants.DefaultsKey.rightCommandLanguage) ?? Constants.Default.rightLanguage

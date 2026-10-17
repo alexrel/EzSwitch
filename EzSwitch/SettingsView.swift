@@ -3,12 +3,27 @@ import Carbon
 
 struct SettingsView: View {
     @StateObject private var settings = SettingsManager.shared
+    @ObservedObject private var wordStore = WordMapperStore.shared
+    @ObservedObject private var mapperStore = MapperStore.shared
 
     @State private var availableLanguages: [String] = []
     @State private var isLoaded = false
     @State private var hasAccessibility = false
+    @State private var showAboutPopover = false
 
     private let noneOption = "None"
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
+    }
+
+    private var appBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
+    private var gitCommitHash: String? {
+        Bundle.main.infoDictionary?["GitCommitHash"] as? String
+    }
 
     private var languagesForPicker: [String] {
         var set = Set(availableLanguages)
@@ -64,6 +79,20 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
 
                     Spacer()
+
+                    Button {
+                        showAboutPopover.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .help(String(localized: "About EzSwitch"))
+                    .popover(isPresented: $showAboutPopover, arrowEdge: .bottom) {
+                        aboutPopoverContent
+                    }
 
                     Circle()
                         .fill(hasAccessibility ? Color.green : Color.orange)
@@ -161,6 +190,70 @@ struct SettingsView: View {
                                     removal: .move(edge: .top).combined(with: .opacity)
                                 ))
                             }
+
+                            Divider().opacity(0.3)
+
+                            HStack {
+                                Image(systemName: "keyboard.badge.ellipsis")
+                                    .foregroundColor(.purple)
+                                    .font(.system(size: 12))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(String(localized: "Character Mappings"))
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text(currentMapperInfo)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                                Spacer()
+                                Button(action: openMappersWindow) {
+                                    Text(String(localized: "Open"))
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .tint(.purple)
+                            }
+
+                            presetPickerView
+                        }
+                    }
+
+                    // Word Substitutions card
+                    SettingsCard(icon: "text.badge.checkmark", title: String(localized: "Word Substitutions"), color: .indigo) {
+                        VStack(spacing: 6) {
+                            Toggle(String(localized: "Auto-replace"), isOn: $settings.enableWordSubstitution)
+                                .toggleStyle(CompactToggleStyle(tint: .indigo))
+
+                            HStack {
+                                Image(systemName: "character.book.closed")
+                                    .foregroundColor(.indigo)
+                                    .font(.system(size: 12))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(currentWordSubstitutionInfo)
+                                        .font(.system(size: 11, weight: .medium))
+                                    HStack(spacing: 4) {
+                                        Text(String(localized: "Quick remember:"))
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                        Text(settings.wordRememberHotkey.displayLabel)
+                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(Color.primary.opacity(0.08))
+                                            .cornerRadius(3)
+                                    }
+                                }
+                                Spacer()
+                                Button(action: openWordsWindow) {
+                                    Text(String(localized: "Open"))
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .tint(.indigo)
+                            }
                         }
                     }
 
@@ -178,33 +271,6 @@ struct SettingsView: View {
                                     .toggleStyle(CompactToggleStyle(tint: .green))
                                     .labelsHidden()
                             }
-
-                            Divider().opacity(0.3)
-
-                            HStack {
-                                Image(systemName: "keyboard.badge.ellipsis")
-                                    .foregroundColor(.indigo)
-                                    .font(.system(size: 12))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(String(localized: "Keyboard Mappers"))
-                                        .font(.system(size: 12, weight: .medium))
-                                    Text(currentMapperInfo)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                }
-                                Spacer()
-                                Button(action: openMappersWindow) {
-                                    Text(String(localized: "Open"))
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .tint(.indigo)
-                            }
-
-                            presetPickerView
                         }
                     }
 
@@ -246,6 +312,47 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .focusable(false)
                     }
+
+                    // Footer: version + author
+                    HStack(spacing: 6) {
+                        Button {
+                            showAboutPopover.toggle()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text("EzSwitch v\(appVersion)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                Text("•")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary.opacity(0.5))
+                                Text("by AlexReL")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .focusable(false)
+
+                        Spacer()
+
+                        if let githubURL = URL(string: "https://github.com/alexrel/EzSwitch") {
+                            Button {
+                                NSWorkspace.shared.open(githubURL)
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Text("GitHub")
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 8, weight: .semibold))
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.blue.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
                 }
             }
             .padding(.horizontal, 14)
@@ -260,6 +367,87 @@ struct SettingsView: View {
                 checkPermissions()
             }
         }
+    }
+
+    // MARK: - About Popover
+
+    private var aboutPopoverContent: some View {
+        VStack(spacing: 10) {
+            if let appIcon = NSImage(named: "AppIcon") {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 48, height: 48)
+                    .cornerRadius(11)
+                    .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
+            } else {
+                Image(systemName: "keyboard.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.blue)
+                    .frame(width: 48, height: 48)
+                    .background(Color.blue.opacity(0.12))
+                    .cornerRadius(11)
+            }
+
+            VStack(spacing: 3) {
+                Text("EzSwitch")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                Text("Version \(appVersion)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.primary.opacity(0.85))
+                HStack(spacing: 4) {
+                    Text("Build \(appBuild)")
+                    if let hash = gitCommitHash, !hash.isEmpty {
+                        Text("•")
+                            .foregroundColor(.secondary.opacity(0.4))
+                        Text(hash)
+                    }
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            VStack(spacing: 5) {
+                HStack(spacing: 4) {
+                    Text(String(localized: "Author:"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text("AlexReL")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+
+                if let githubURL = URL(string: "https://github.com/alexrel/EzSwitch") {
+                    Button {
+                        NSWorkspace.shared.open(githubURL)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("github.com/alexrel/EzSwitch")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(Color.blue.opacity(0.1))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                }
+            }
+
+            Text("© 2026 AlexReL · MIT License")
+                .font(.system(size: 9.5))
+                .foregroundColor(.secondary.opacity(0.8))
+                .padding(.top, 2)
+        }
+        .padding(16)
+        .frame(width: 250)
     }
 
     // MARK: - Sub-views
@@ -302,7 +490,7 @@ struct SettingsView: View {
         if !presets.isEmpty {
             HStack(spacing: 6) {
                 Image(systemName: "list.bullet.rectangle.portrait")
-                    .foregroundColor(.indigo)
+                    .foregroundColor(.purple)
                     .font(.system(size: 11))
                     .frame(width: 16)
                 Text(String(localized: "Preset"))
@@ -323,11 +511,18 @@ struct SettingsView: View {
 
     /// Separate binding to avoid Swift compiler "unable to type-check" with inline closures.
     private var presetSelectionBinding: Binding<String> {
-        let key = currentPairKey
+        let left = settings.leftCommandLanguage
+        let right = settings.rightCommandLanguage
         let presets = availablePresetsForCurrentPair
         return Binding(
-            get: { settings.selectedPresetIds[key] ?? presets.first?.id ?? "" },
-            set: { settings.selectedPresetIds[key] = $0 }
+            get: {
+                if let saved = settings.selectedPresetId(for: left, right),
+                   presets.contains(where: { $0.id == saved }) {
+                    return saved
+                }
+                return presets.first?.id ?? ""
+            },
+            set: { settings.setSelectedPresetId($0, for: left, right) }
         )
     }
 
@@ -431,9 +626,8 @@ struct SettingsView: View {
             return String(localized: "No mapping for this pair")
         }
         // Prefer the preset the user explicitly picked for this pair.
-        let key = "\(left)|\(right)"
-        let active = settings.selectedPresetIds[key]
-            .flatMap { id in MapperStore.shared.preset(byID: id) }
+        let active = settings.selectedPresetId(for: left, right)
+            .flatMap { id in presets.first(where: { $0.id == id }) }
             ?? presets.first
         if let preset = active {
             return String(localized: "\(preset.name) — \(preset.mappingCount) chars")
@@ -441,8 +635,29 @@ struct SettingsView: View {
         return String(localized: "No mapping for this pair")
     }
 
+    private var currentWordSubstitutionInfo: String {
+        let left = settings.leftCommandLanguage
+        let right = settings.rightCommandLanguage
+        if left == noneOption || right == noneOption {
+            return String(localized: "Pick a pair of languages")
+        }
+        let pair = LayoutPair(from: left, to: right)
+        let count = wordStore.entries(for: pair).count
+        if count == 0 {
+            return String(localized: "No words saved yet")
+        }
+        return String.localizedStringWithFormat(
+            NSLocalizedString("%d words for current pair", comment: ""),
+            count
+        )
+    }
+
     private func openMappersWindow() {
-        MapperWindowController.shared.showWindow()
+        MapperWindowController.shared.showWindow(mode: .character)
+    }
+
+    private func openWordsWindow() {
+        MapperWindowController.shared.showWindow(mode: .word)
     }
 
     private func reloadAvailableLanguages() {

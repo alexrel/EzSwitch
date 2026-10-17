@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+extension Notification.Name {
+    static let switchMapperMode = Notification.Name("EzSwitchSwitchMapperMode")
+}
+
 /// Manages a single instance of the Mapper Settings window.
 /// Ensures only one window is open at a time, and brings it to front when re-opened.
 final class MapperWindowController: NSObject, NSWindowDelegate {
@@ -13,14 +17,15 @@ final class MapperWindowController: NSObject, NSWindowDelegate {
     }
 
     /// Show the mapper settings window (or focus if already open)
-    func showWindow() {
+    func showWindow(mode: MapperSettingsView.EditorMode = .character) {
         if let existing = window, existing.isVisible {
+            NotificationCenter.default.post(name: .switchMapperMode, object: mode)
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let contentView = MapperSettingsView()
+        let contentView = MapperSettingsView(initialMode: mode)
         let hosting = NSHostingController(rootView: contentView)
 
         let windowSize = NSSize(width: 820, height: 640)
@@ -35,7 +40,7 @@ final class MapperWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        newWindow.title = NSLocalizedString("EzSwitch — Mappers", comment: "")
+        newWindow.title = NSLocalizedString("EzSwitch — Custom Rules (Mappers & Words)", comment: "")
         newWindow.contentViewController = hosting
         newWindow.delegate = self
         newWindow.minSize = NSSize(width: 760, height: 540)

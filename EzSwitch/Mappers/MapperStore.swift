@@ -52,10 +52,11 @@ final class MapperStore: ObservableObject {
 
     // MARK: - Public API
 
-    /// Get all presets for a specific layout pair
+    /// Get all presets for a specific layout pair (in either order)
     func presets(for pair: LayoutPair) -> [LayoutMapperPreset] {
         ensureSeeded()
-        return presets.filter { $0.pair == pair }
+        let inverse = LayoutPair(from: pair.to, to: pair.from)
+        return presets.filter { $0.pair == pair || $0.pair == inverse }
     }
 
     /// Get a preset by ID
@@ -117,7 +118,22 @@ final class MapperStore: ObservableObject {
             let data = try Data(contentsOf: presetsFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            presets = try decoder.decode([LayoutMapperPreset].self, from: data)
+            let loaded = try decoder.decode([LayoutMapperPreset].self, from: data)
+            // Deduplicate identical "(auto)" presets created by previous versions
+            var seenAutoNames: Set<String> = []
+            var deduplicated: [LayoutMapperPreset] = []
+            for p in loaded {
+                if p.name.hasSuffix("(auto)") {
+                    let key = "\(p.fromLayout)|\(p.toLayout)|\(p.name)"
+                    if seenAutoNames.contains(key) { continue }
+                    seenAutoNames.insert(key)
+                }
+                deduplicated.append(p)
+            }
+            presets = deduplicated
+            if deduplicated.count != loaded.count {
+                persist()
+            }
             print("🗂 [MapperStore] Loaded \(presets.count) preset(s) from disk")
         } catch {
             print("⚠️ [MapperStore] Failed to load presets: \(error.localizedDescription)")
@@ -126,15 +142,16 @@ final class MapperStore: ObservableObject {
 
     /// Save presets to JSON file
     private func persist() {
-        queue.async { [weak self] in
+        let snapshot = presets
+        queue.async { [weak self, snapshot] in
             guard let self = self else { return }
             do {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 encoder.dateEncodingStrategy = .iso8601
-                let data = try encoder.encode(self.presets)
+                let data = try encoder.encode(snapshot)
                 try data.write(to: self.presetsFileURL, options: .atomic)
-                print("🗂 [MapperStore] Saved \(self.presets.count) preset(s) to disk")
+                print("🗂 [MapperStore] Saved \(snapshot.count) preset(s) to disk")
             } catch {
                 print("⚠️ [MapperStore] Failed to save presets: \(error.localizedDescription)")
             }
@@ -155,7 +172,7 @@ final class MapperStore: ObservableObject {
         // to map. The user can still build a preset manually later.
         guard !from.isEmpty, !to.isEmpty,
               from != to,
-              from != "None", to != "None" else {
+              from != Constants.Default.noneLanguage, to != Constants.Default.noneLanguage else {
             print("🌱 [MapperStore] Skipping auto-seed: invalid pair (\(from) → \(to))")
             return
         }
@@ -167,15 +184,15 @@ final class MapperStore: ObservableObject {
         }
 
         let preset = LayoutMapperPreset(
-            name: "\(from) → \(to) (auto)",
+            name: "\(from) ↔ \(to) (auto)",
             fromLayout: from,
             toLayout: to,
             mapping: mapping,
             description: "Auto-generated on first launch via UCKeyTranslate"
         )
         presets.append(preset)
-        settings.selectedPresetIds[Constants.WordSub.pairKey(from: from, to: to)] = preset.id
+        settings.setSelectedPresetId(preset.id, for: from, to)
         persist()
-        print("🌱 [MapperStore] Auto-seeded preset for \(from) → \(to) with \(mapping.count) entries")
+        print("🌱 [MapperStore] Auto-seeded preset for \(from) ↔ \(to) with \(mapping.count) entries")
     }
 }

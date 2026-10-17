@@ -10,6 +10,8 @@ struct MapperSettingsView: View {
     @State private var toLayout: String = ""
     @State private var availableLayouts: [String] = []
 
+    var initialMode: EditorMode = .character
+
     /// The preset being edited. `nil` means we are about to create a new one
     /// (after the user picks a pair and clicks "New" or "Auto").
     @State private var working: LayoutMapperPreset? = nil
@@ -17,13 +19,13 @@ struct MapperSettingsView: View {
     @State private var showDeleteConfirmation: Bool = false
     @State private var mode: EditorMode = .character
 
-    private enum EditorMode: String, CaseIterable, Identifiable {
+    enum EditorMode: String, CaseIterable, Identifiable {
         case character = "Character Mappings"
         case word = "Word Substitutions"
         var id: String { rawValue }
     }
 
-    private let noneOption = "None"
+    private let noneOption = Constants.Default.noneLanguage
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,61 +34,61 @@ struct MapperSettingsView: View {
             // segmented control don't shift when switching between
             // tabs (each tab's content has a different intrinsic height).
             VStack(spacing: 0) {
-                // 1) Pair + preset selector
+                // 1) Pair + mode selector
                 header
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                Divider()
-
-                // 1b) Mode switcher (character vs word-level)
-                Picker("", selection: $mode) {
-                    ForEach(EditorMode.allCases) { m in
-                        Text(m.rawValue).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
                 Divider()
             }
 
             // 2) Editor (visual keyboard + test area + picker) or word list.
-            // The Group with .frame(maxHeight: .infinity) gives the bottom
-            // content (Table, ScrollView, etc.) a concrete height to render
-            // into. The top section above is pinned at 112pt, so the
-            // window height change between tabs is absorbed by this Group
-            // — the From/To block and the segmented Picker stay put.
             Group {
                 switch mode {
                 case .character:
                     if let _ = working {
                         WorkingEditor(
                             working: $working,
-                            onSave: { store.save($0) },
-                            onDelete: { id in
-                                store.delete(id: id)
-                                working = selectPresetForCurrentPair()
-                            }
+                            presetsForPair: store.presets(for: LayoutPair(from: fromLayout, to: toLayout)),
+                            onSelectPreset: { newID in
+                                if let p = store.preset(byID: newID) {
+                                    working = p
+                                    settings.setSelectedPresetId(p.id, for: fromLayout, toLayout)
+                                }
+                            },
+                            onNewPreset: { showNewSheet = true },
+                            onDeletePreset: { showDeleteConfirmation = true },
+                            onSave: { store.save($0) }
                         )
                     } else {
                         emptyState
                     }
                 case .word:
-                    WordSubstitutionView()
+                    WordSubstitutionView(selectedFromLayout: fromLayout, selectedToLayout: toLayout)
                 }
             }
             .frame(maxHeight: .infinity)
         }
-        .frame(minWidth: 760, minHeight: 540)
+        .frame(minWidth: 780, minHeight: 560)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             reloadLayouts()
-            if fromLayout.isEmpty { fromLayout = "Russian – PC" }
-            if toLayout.isEmpty { toLayout = "ABC" }
-            // Auto-load the preset the user has selected for this pair
-            // (falling back to the first preset if nothing is saved).
+            if fromLayout.isEmpty {
+                fromLayout = settings.leftCommandLanguage != Constants.Default.noneLanguage
+                    ? settings.leftCommandLanguage
+                    : Constants.Default.leftLanguage
+            }
+            if toLayout.isEmpty {
+                toLayout = settings.rightCommandLanguage != Constants.Default.noneLanguage
+                    ? settings.rightCommandLanguage
+                    : Constants.Default.rightLanguage
+            }
+            mode = initialMode
             working = selectPresetForCurrentPair()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchMapperMode)) { notif in
+            if let newMode = notif.object as? EditorMode {
+                mode = newMode
+            }
         }
         .onChange(of: fromLayout) { _, _ in
             working = selectPresetForCurrentPair()
@@ -101,6 +103,7 @@ struct MapperSettingsView: View {
                 onCreate: { preset in
                     store.save(preset)
                     working = preset
+                    settings.setSelectedPresetId(preset.id, for: fromLayout, toLayout)
                     showNewSheet = false
                 },
                 onCancel: { showNewSheet = false }
@@ -113,10 +116,9 @@ struct MapperSettingsView: View {
             presenting: working
         ) { preset in
             Button(String(localized: "Delete “\(preset.name)”"), role: .destructive) {
-                let key = "\(fromLayout)|\(toLayout)"
                 store.delete(id: preset.id)
-                if settings.selectedPresetIds[key] == preset.id {
-                    settings.selectedPresetIds.removeValue(forKey: key)
+                if settings.selectedPresetId(for: fromLayout, toLayout) == preset.id {
+                    settings.setSelectedPresetId(nil, for: fromLayout, toLayout)
                 }
                 working = selectPresetForCurrentPair()
             }
@@ -126,130 +128,68 @@ struct MapperSettingsView: View {
         }
     }
 
-    /// Pick the preset the user previously chose for the current pair.
+    /// Pick the preset the user previously chose for the current pair (in either order).
     /// Falls back to the first preset for the pair if nothing is saved.
     private func selectPresetForCurrentPair() -> LayoutMapperPreset? {
         let pair = LayoutPair(from: fromLayout, to: toLayout)
         let presets = store.presets(for: pair)
         guard !presets.isEmpty else { return nil }
-        let key = "\(fromLayout)|\(toLayout)"
-        if let savedId = settings.selectedPresetIds[key],
+        if let savedId = settings.selectedPresetId(for: fromLayout, toLayout),
            let preset = presets.first(where: { $0.id == savedId }) {
             return preset
         }
         return presets.first
     }
 
-    // MARK: - Header (pair + preset picker)
+    // MARK: - Header (pair picker + mode switcher)
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 12) {
+            // Bidirectional language pair selector
             HStack(spacing: 8) {
-                // From layout
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "From"))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Picker("", selection: $fromLayout) {
-                        ForEach(layoutOptions, id: \.self) { l in
-                            Text(l).tag(l)
-                        }
+                Image(systemName: "globe")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.accentColor)
+
+                Picker("", selection: $fromLayout) {
+                    ForEach(layoutOptions, id: \.self) { l in
+                        Text(l).tag(l)
                     }
-                    .labelsHidden()
-                    .fixedSize()
                 }
-                Image(systemName: "arrow.right")
+                .labelsHidden()
+                .fixedSize()
+
+                Image(systemName: "arrow.left.and.right")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.secondary)
-                    .padding(.top, 14)
 
-                // To layout
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "To"))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Picker("", selection: $toLayout) {
-                        ForEach(layoutOptions, id: \.self) { l in
-                            Text(l).tag(l)
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-
-                // Preset picker (between two layouts and actions)
-                if let working = working {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(localized: "Preset"))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Picker("", selection: Binding(
-                            get: { working.id },
-                            set: { newID in
-                                if let p = store.preset(byID: newID) {
-                                    self.working = p
-                                    settings.selectedPresetIds["\(fromLayout)|\(toLayout)"] = p.id
-                                }
-                            }
-                        )) {
-                            ForEach(store.presets(for: LayoutPair(from: fromLayout, to: toLayout))) { p in
-                                Text(p.name).tag(p.id as String?)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
+                Picker("", selection: $toLayout) {
+                    ForEach(layoutOptions, id: \.self) { l in
+                        Text(l).tag(l)
                     }
                 }
+                .labelsHidden()
+                .fixedSize()
+            }
 
-                Spacer()
+            Spacer()
 
-                // Action buttons
-                HStack(spacing: 6) {
-                    Button {
-                        showNewSheet = true
-                    } label: {
-                        Label(String(localized: "New"), systemImage: "plus")
-                    }
-                    .controlSize(.small)
-
-                    Button {
-                        // Auto-generate a fresh preset with UCKeyTranslate mapping
-                        let mapping = KeyboardLayoutUtility.buildMapping(
-                            fromLayout: fromLayout,
-                            toLayout: toLayout
-                        )
-                        let auto = store.createPreset(
-                            name: "\(fromLayout) → \(toLayout) (auto)",
-                            from: fromLayout,
-                            to: toLayout,
-                            mapping: mapping
-                        )
-                        working = auto
-                        // Make the new preset the active one for this pair
-                        settings.selectedPresetIds["\(fromLayout)|\(toLayout)"] = auto.id
-                    } label: {
-                        Label(String(localized: "Auto"), systemImage: "wand.and.stars")
-                    }
-                    .controlSize(.small)
-                    .disabled(fromLayout == toLayout || fromLayout == noneOption || toLayout == noneOption)
-
-                    if working != nil {
-                        Button(role: .destructive) {
-                            showDeleteConfirmation = true
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .controlSize(.small)
-                        .help(String(localized: "Delete"))
-                    }
+            // Mode switcher (Character Mappings vs Word Substitutions)
+            Picker("", selection: $mode) {
+                ForEach(EditorMode.allCases) { m in
+                    Text(LocalizedStringKey(m.rawValue)).tag(m)
                 }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 340)
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Image(systemName: "keyboard")
-                .font(.system(size: 56))
+                .font(.system(size: 52))
                 .foregroundColor(.secondary.opacity(0.4))
             Text(String(localized: "No preset for this pair"))
                 .font(.headline)
@@ -259,6 +199,34 @@ struct MapperSettingsView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            HStack(spacing: 10) {
+                Button {
+                    showNewSheet = true
+                } label: {
+                    Label(String(localized: "New"), systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    let mapping = KeyboardLayoutUtility.buildMapping(
+                        fromLayout: fromLayout,
+                        toLayout: toLayout
+                    )
+                    let auto = store.createPreset(
+                        name: "\(fromLayout) ↔ \(toLayout) (auto)",
+                        from: fromLayout,
+                        to: toLayout,
+                        mapping: mapping
+                    )
+                    working = auto
+                    settings.setSelectedPresetId(auto.id, for: fromLayout, toLayout)
+                } label: {
+                    Label(String(localized: "Auto-generate"), systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(fromLayout == toLayout || fromLayout == noneOption || toLayout == noneOption)
+            }
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -287,17 +255,26 @@ struct MapperSettingsView: View {
 
 struct WorkingEditor: View {
     @Binding var working: LayoutMapperPreset?
+    let presetsForPair: [LayoutMapperPreset]
+    let onSelectPreset: (String) -> Void
+    let onNewPreset: () -> Void
+    let onDeletePreset: () -> Void
     let onSave: (LayoutMapperPreset) -> Void
-    let onDelete: (String) -> Void
 
     var body: some View {
-        MapperEditorView(preset: Binding(
-            get: { working ?? LayoutMapperPreset(name: "—", fromLayout: "?", toLayout: "?") },
-            set: { newValue in
-                working = newValue
-                onSave(newValue)
-            }
-        ))
+        MapperEditorView(
+            preset: Binding(
+                get: { working ?? LayoutMapperPreset(name: "—", fromLayout: "?", toLayout: "?") },
+                set: { newValue in
+                    working = newValue
+                    onSave(newValue)
+                }
+            ),
+            presetsForPair: presetsForPair,
+            onSelectPreset: onSelectPreset,
+            onNewPreset: onNewPreset,
+            onDeletePreset: onDeletePreset
+        )
     }
 }
 

@@ -14,7 +14,7 @@ enum KeyboardLayoutUtility {
     /// are NOT the same as Carbon event modifier masks (`Constants.ModifierMask`)
     /// — the UCKeyTranslate API uses a separate, smaller bitfield.
     /// Enum raw values must be literals, so we repeat the bits here.
-    enum Modifier: UInt32 {
+    enum Modifier: UInt32, Codable {
         case none = 0
         case shift = 0x02          // 1 << 1
         case option = 0x08         // 1 << 3

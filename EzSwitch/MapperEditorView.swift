@@ -92,6 +92,11 @@ struct KeyboardLayoutGrid {
 /// Shows a virtual keyboard where each key displays its mapping.
 struct MapperEditorView: View {
     @Binding var preset: LayoutMapperPreset
+    var presetsForPair: [LayoutMapperPreset] = []
+    var onSelectPreset: ((String) -> Void)? = nil
+    var onNewPreset: (() -> Void)? = nil
+    var onDeletePreset: (() -> Void)? = nil
+
     @ObservedObject private var store = MapperStore.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -102,6 +107,8 @@ struct MapperEditorView: View {
     @State private var pickerChar: String = ""
     @State private var showSaveAlert: Bool = false
     @State private var newName: String = ""
+    @State private var showAutoConfirm: Bool = false
+    @State private var showClearKeysConfirm: Bool = false
 
     // Local working copy of the modifier for the picker so the user can override
     // the auto-detected one (e.g. map "п" with Shift modifier).
@@ -123,9 +130,17 @@ struct MapperEditorView: View {
                     // Test area
                     testArea
                     // Normal keys
-                    keyboardSection(title: String(localized: "No modifier (base)"), modifier: .none)
+                    keyboardSection(
+                        title: String(localized: "No modifier (base)"),
+                        icon: "keyboard",
+                        modifier: .none
+                    )
                     // Shift keys
-                    keyboardSection(title: String(localized: "With Shift held"), modifier: .shift)
+                    keyboardSection(
+                        title: String(localized: "With Shift held"),
+                        icon: "shift.fill",
+                        modifier: .shift
+                    )
                     // Extra mappings (custom combos with explicit modifier)
                     extraSection
                 }
@@ -146,59 +161,169 @@ struct MapperEditorView: View {
                 extraPickerSheet(mapping: binding(for: mapping))
             }
         }
+        .confirmationDialog(
+            String(localized: "Overwrite current mapping with auto-generated keys?"),
+            isPresented: $showAutoConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Auto-generate"), role: .destructive) {
+                applyAutoMapping()
+            }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "All custom key changes in “\(preset.name)” will be replaced with the default \(preset.fromLayout) → \(preset.toLayout) layout mapping."))
+        }
+        .confirmationDialog(
+            String(localized: "Clear all mapped keys in this preset?"),
+            isPresented: $showClearKeysConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Clear keys"), role: .destructive) {
+                resetMapping()
+            }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "This will clear all \(preset.mapping.count) mapped keys in “\(preset.name)”."))
+        }
     }
 
     // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: "Mapper editor"))
-                    .font(.title2.bold())
-                Text("\(preset.fromLayout) → \(preset.toLayout)")
-                    .font(.subheadline)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(String(localized: "Mapper editor"))
+                        .font(.title3.bold())
+                    Text(verbatim: "\(preset.mapping.count) " + String(localized: "characters"))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(Color.accentColor.opacity(0.12))
+                        )
+                }
+                Text("\(preset.fromLayout) ↔ \(preset.toLayout)")
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .fixedSize(horizontal: true, vertical: true)
+
             Spacer()
-            Text(verbatim: "\(preset.mapping.count) " + String(localized: "characters"))
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.secondary.opacity(0.15))
-                .cornerRadius(8)
+
+            // Preset selector & preset actions (only visible on Character Mappings tab)
+            HStack(spacing: 6) {
+                if !presetsForPair.isEmpty {
+                    Picker("", selection: Binding(
+                        get: { preset.id },
+                        set: { newID in
+                            onSelectPreset?(newID)
+                        }
+                    )) {
+                        ForEach(presetsForPair) { p in
+                            Text(p.name).tag(p.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(maxWidth: 220)
+                }
+
+                if let onNewPreset = onNewPreset {
+                    Button {
+                        onNewPreset()
+                    } label: {
+                        Label(String(localized: "New"), systemImage: "plus")
+                    }
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help(String(localized: "Create a new preset"))
+                }
+
+                Button {
+                    if preset.mapping.isEmpty {
+                        applyAutoMapping()
+                    } else {
+                        showAutoConfirm = true
+                    }
+                } label: {
+                    Label(String(localized: "Auto"), systemImage: "wand.and.stars")
+                }
+                .controlSize(.small)
+                .fixedSize()
+                .help(String(localized: "Fill keys automatically from system layouts"))
+
+                Button {
+                    showClearKeysConfirm = true
+                } label: {
+                    Image(systemName: "eraser")
+                }
+                .controlSize(.small)
+                .disabled(preset.mapping.isEmpty)
+                .help(String(localized: "Clear all keys…"))
+
+                if let onDeletePreset = onDeletePreset {
+                    Button(role: .destructive) {
+                        onDeletePreset()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .controlSize(.small)
+                    .help(String(localized: "Delete preset…"))
+                }
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .frame(height: 56)
     }
 
     // MARK: - Test Area
 
     private var testArea: some View {
-        HStack(spacing: 10) {
-            // Title
-            Text(String(localized: "Test mapping"))
-                .font(.headline)
-                .layoutPriority(1)
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.cursor")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text(String(localized: "Test mapping"))
+                    .font(.subheadline.weight(.semibold))
+            }
+            .layoutPriority(1)
 
-            // Input field with caption above
+            // Input field
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(format: String(localized: "Input (%@)"), preset.fromLayout))
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                TextField(String(localized: "Enter text to test…"), text: $testInput)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: testInput) { _, newValue in
-                        testOutput = transform(newValue)
+                HStack(spacing: 4) {
+                    TextField(String(localized: "Enter text to test…"), text: $testInput)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: testInput) { _, newValue in
+                            testOutput = transform(newValue)
+                        }
+                    if !testInput.isEmpty {
+                        Button {
+                            testInput = ""
+                            testOutput = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(String(localized: "Clear test text"))
                     }
+                }
             }
             .frame(maxWidth: .infinity)
 
             Image(systemName: "arrow.right")
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
                 .padding(.top, 14)
 
-            // Result field with caption above
+            // Result field
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(format: String(localized: "Result (%@)"), preset.toLayout))
                     .font(.caption2)
@@ -208,88 +333,177 @@ struct MapperEditorView: View {
                     .disabled(true)
             }
             .frame(maxWidth: .infinity)
-
-            // Action buttons
-            HStack(spacing: 6) {
-                Button {
-                    applyAutoMapping()
-                } label: {
-                    Label(String(localized: "Auto-generate"), systemImage: "wand.and.stars")
-                }
-                .controlSize(.small)
-
-                Button {
-                    resetMapping()
-                } label: {
-                    Label(String(localized: "Clear"), systemImage: "trash")
-                }
-                .controlSize(.small)
-            }
-            .padding(.top, 14)
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color.accentColor.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.accentColor.opacity(0.15), lineWidth: 1)
+                )
         )
     }
-    private func keyboardSection(title: String, modifier: KeyboardLayoutUtility.Modifier) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.headline)
-            VStack(spacing: 3) {
-                ForEach(Array(grid.rows.enumerated()), id: \.offset) { _, row in
-                    HStack(spacing: 3) {
+
+    // MARK: - Keyboard Section
+
+    private func keyboardSection(title: String, icon: String, modifier: KeyboardLayoutUtility.Modifier) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Text(preset.fromLayout)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Image(systemName: "arrow.down.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.secondary.opacity(0.6))
+                    Text(preset.toLayout)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.accentColor)
+                    Text("·")
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text(String(localized: "Click any key to edit"))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 4)
+
+            // Recessed aluminum-style keyboard well
+            VStack(spacing: 6) {
+                ForEach(Array(grid.rows.enumerated()), id: \.offset) { rowIndex, row in
+                    HStack(spacing: 6) {
+                        // Left decorative modifier cap to create authentic staggered keyboard geometry
+                        if rowIndex == 1 {
+                            decorativeCap(symbol: "arrow.right.to.line.compact", fallbackLabel: "tab", width: 38)
+                        } else if rowIndex == 2 {
+                            decorativeCap(symbol: "capslock", fallbackLabel: "caps", width: 46)
+                        } else if rowIndex == 3 {
+                            decorativeCap(symbol: "shift.fill", fallbackLabel: "shift", width: 58, isHighlighted: modifier == .shift)
+                        }
+
                         ForEach(row) { key in
                             keyButton(for: key, modifier: modifier)
+                        }
+
+                        // Right decorative cap to balance the row widths
+                        if rowIndex == 2 {
+                            decorativeCap(symbol: "return", fallbackLabel: "return", width: 46)
+                        } else if rowIndex == 3 {
+                            decorativeCap(symbol: "shift.fill", fallbackLabel: "shift", width: 58, isHighlighted: modifier == .shift)
                         }
                     }
                 }
             }
+            .padding(11)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.08),
+                                    Color.black.opacity(0.05)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.09), lineWidth: 1)
+                }
+            )
         }
-        .padding(10)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(NSColor.controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                )
         )
+    }
+
+    private func decorativeCap(symbol: String, fallbackLabel: String, width: CGFloat, isHighlighted: Bool = false) -> some View {
+        ZStack {
+            // 3D bottom lip
+            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                .fill(
+                    isHighlighted
+                        ? Color.accentColor.opacity(0.38)
+                        : Color.black.opacity(0.18)
+                )
+                .offset(y: 2)
+
+            // Keycap top surface
+            RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: isHighlighted
+                            ? [Color.accentColor.opacity(0.24), Color.accentColor.opacity(0.14)]
+                            : [Color.primary.opacity(0.05), Color.primary.opacity(0.09)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .background(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(Color(NSColor.windowBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .stroke(
+                            isHighlighted
+                                ? Color.accentColor.opacity(0.55)
+                                : Color.primary.opacity(0.12),
+                            lineWidth: 1
+                        )
+                )
+
+            // Modifier legend + optional LED indicator dot (like Apple Caps/Shift LED)
+            ZStack {
+                if isHighlighted {
+                    VStack {
+                        HStack {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 4.5, height: 4.5)
+                                .shadow(color: Color.green.opacity(0.8), radius: 2)
+                            Spacer()
+                        }
+                        Spacer()
+                    }
+                    .padding(5)
+                }
+
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(isHighlighted ? .accentColor : .secondary.opacity(0.65))
+            }
+        }
+        .frame(width: width, height: 40)
     }
 
     private func keyButton(for key: VisualKey, modifier: KeyboardLayoutUtility.Modifier) -> some View {
         let sourceChar = lookupSource(for: key, modifier: modifier)
         let targetChar = preset.mapping[sourceChar]
 
-        return Button {
-            editingKey = key
-            editingModifier = modifier
-        } label: {
-            HStack(spacing: 3) {
-                Text(sourceChar)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.7))
-                Text(targetChar ?? "—")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundColor(targetChar != nil ? .accentColor : .secondary.opacity(0.4))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+        return KeycapButton(
+            sourceChar: sourceChar,
+            targetChar: targetChar,
+            action: {
+                editingKey = key
+                editingModifier = modifier
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 32)
-            .padding(.horizontal, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(targetChar != nil ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(targetChar != nil ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
+        )
     }
 
     // MARK: - Source Lookup
@@ -526,13 +740,26 @@ struct MapperEditorView: View {
     // MARK: - Extra Mappings Section
 
     private var extraSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.forwardslash.minus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.accentColor)
                 Text(String(localized: "Extra"))
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
+                if !preset.extraMappings.isEmpty {
+                    Text("\(preset.extraMappings.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color.accentColor.opacity(0.12))
+                        )
+                }
                 Spacer()
                 Button {
-                    // Add a new empty extra mapping and open the picker
                     let newMapping = LayoutMapperPreset.ExtraMapping(
                         source: "",
                         target: "",
@@ -546,72 +773,52 @@ struct MapperEditorView: View {
                 }
                 .controlSize(.small)
             }
+            .padding(.horizontal, 4)
 
             if preset.extraMappings.isEmpty {
-                Text(String(localized: "No extra mappings. Click Add to create one."))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 4)
+                HStack {
+                    Spacer()
+                    Text(String(localized: "No extra mappings. Click Add to create one."))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 10)
+                    Spacer()
+                }
             } else {
-                VStack(spacing: 3) {
+                VStack(spacing: 4) {
                     ForEach(preset.extraMappings) { mapping in
-                        Button {
-                            editingExtraMapping = mapping
-                            isExtraPickerOpen = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(mapping.source.isEmpty ? "?" : mapping.source)
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundColor(.primary)
-                                    .frame(minWidth: 20)
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary)
-                                Text(mapping.target.isEmpty ? "—" : mapping.target)
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .foregroundColor(mapping.target.isEmpty ? .secondary.opacity(0.4) : .accentColor)
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(modifierLabel(mapping.modifier))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.secondary.opacity(0.1))
-                                    .cornerRadius(3)
-                                // Delete button
-                                Button {
-                                    if let idx = preset.extraMappings.firstIndex(where: { $0.id == mapping.id }) {
-                                        preset.extraMappings.remove(at: idx)
-                                    }
-                                    testOutput = transform(testInput)
-                                } label: {
-                                    Image(systemName: "minus.circle")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.red.opacity(0.7))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.accentColor.opacity(0.08))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.accentColor.opacity(0.2), lineWidth: 0.5)
-                            )
+                        let hasReverse = preset.extraMappings.contains {
+                            !mapping.source.isEmpty && !mapping.target.isEmpty &&
+                            $0.source == mapping.target && $0.target == mapping.source
                         }
-                        .buttonStyle(.plain)
+                        MappingListRow(
+                            source: mapping.source.isEmpty ? "?" : mapping.source,
+                            target: mapping.target.isEmpty ? "—" : mapping.target,
+                            modifier: mapping.modifier,
+                            isBidirectional: hasReverse,
+                            onEdit: {
+                                editingExtraMapping = mapping
+                                isExtraPickerOpen = true
+                            },
+                            onDelete: {
+                                if let idx = preset.extraMappings.firstIndex(where: { $0.id == mapping.id }) {
+                                    preset.extraMappings.remove(at: idx)
+                                }
+                                testOutput = transform(testInput)
+                            }
+                        )
                     }
                 }
             }
         }
-        .padding(10)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(NSColor.controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                )
         )
     }
 
@@ -621,10 +828,9 @@ struct MapperEditorView: View {
         VStack(spacing: 0) {
             // Top: title + modifier picker in top-right corner
             HStack(spacing: 6) {
-                Text(String(localized: "Map key"))
+                Text(String(localized: "Extra Mapping"))
                     .font(.headline)
                 Spacer()
-                // Modifier picker (segmented, in top-right)
                 Picker("", selection: mapping.modifier) {
                     Text(String(localized: "None")).tag(KeyboardLayoutUtility.Modifier.none)
                     Text("Shift").tag(KeyboardLayoutUtility.Modifier.shift)
@@ -650,24 +856,29 @@ struct MapperEditorView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         TextField("?", text: mapping.source)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
                             .multilineTextAlignment(.center)
-                            .frame(width: 44, height: 44)
-                            .background(Color.accentColor.opacity(0.15))
+                            .frame(width: 90, height: 42)
+                            .background(Color.accentColor.opacity(0.12))
                             .cornerRadius(8)
+                            .onChange(of: mapping.source.wrappedValue) { _, newValue in
+                                if newValue.contains(where: { $0.isUppercase }) && mapping.modifier.wrappedValue == .none {
+                                    mapping.modifier.wrappedValue = .shift
+                                }
+                            }
                     }
                     Image(systemName: "arrow.right")
-                        .font(.body)
+                        .font(.body.weight(.semibold))
                         .foregroundColor(.secondary)
                     VStack(spacing: 2) {
                         Text(String(localized: "Target"))
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         TextField("", text: mapping.target)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
                             .multilineTextAlignment(.center)
-                            .frame(width: 80, height: 44)
-                            .background(Color.accentColor.opacity(0.15))
+                            .frame(width: 110, height: 42)
+                            .background(Color.accentColor.opacity(0.12))
                             .cornerRadius(8)
                             .help(String(localized: "Type any character, emoji or symbol"))
                     }
@@ -679,7 +890,7 @@ struct MapperEditorView: View {
                    let sourceKey = keyboardKeyForChar(sourceChar) {
                     let suggestions = suggestionsForKey(sourceKey, modifier: mapping.modifier.wrappedValue)
                     if !suggestions.isEmpty {
-                        HStack(spacing: 2) {
+                        HStack(spacing: 4) {
                             ForEach(suggestions, id: \.self) { s in
                                 Button {
                                     mapping.target.wrappedValue = s
@@ -698,11 +909,27 @@ struct MapperEditorView: View {
                 Spacer(minLength: 0)
             }
 
-            // Bottom: Cancel + Save
+            // Bottom: Clear + Cancel + Save
             HStack {
+                Button {
+                    mapping.source.wrappedValue = ""
+                    mapping.target.wrappedValue = ""
+                } label: {
+                    Label(String(localized: "Clear"), systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+
                 Spacer()
                 HStack(spacing: 6) {
                     Button {
+                        // Remove empty placeholder if user cancelled adding a new extra mapping
+                        if mapping.source.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty &&
+                           mapping.target.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                            let id = mapping.id
+                            preset.extraMappings.removeAll { $0.id == id }
+                        }
                         isExtraPickerOpen = false
                     } label: {
                         Label(String(localized: "Cancel"), systemImage: "xmark")
@@ -720,11 +947,13 @@ struct MapperEditorView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .keyboardShortcut(.return)
+                    .disabled(mapping.source.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty ||
+                              mapping.target.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(width: 400, height: 220)
     }
 
@@ -749,15 +978,32 @@ struct MapperEditorView: View {
         return $preset.extraMappings[index]
     }
 
-    /// Apply mapping to test text
+    /// Apply mapping to test text (auto-detects forward vs reverse direction)
     private func transform(_ text: String) -> String {
         guard !text.isEmpty else { return "" }
         let charMap = preset.characterMapping()
-        // Apply base mapping first (values can be multi-character strings)
+
+        // Count forward vs reverse character matches so testing works in either language
+        var forwardHits = 0
+        var reverseHits = 0
+        var reverseMap: [Character: String] = [:]
+        for (k, v) in charMap where v.count == 1 {
+            if let first = v.first {
+                reverseMap[first] = String(k)
+            }
+        }
+        for ch in text {
+            let inForward = charMap[ch] != nil && charMap[ch] != String(ch)
+            let inReverse = reverseMap[ch] != nil && reverseMap[ch] != String(ch)
+            if inForward && !inReverse { forwardHits += 1 }
+            if inReverse && !inForward { reverseHits += 1 }
+        }
+
+        let activeMap = (reverseHits > forwardHits) ? reverseMap : charMap
         var result = ""
         result.reserveCapacity(text.count)
         for char in text {
-            if let mapped = charMap[char] {
+            if let mapped = activeMap[char] {
                 result.append(mapped)
             } else {
                 result.append(char)
@@ -769,5 +1015,241 @@ struct MapperEditorView: View {
             result = result.replacingOccurrences(of: extra.source, with: extra.target)
         }
         return result
+    }
+}
+
+// MARK: - Tactile Keycap Button
+
+private struct KeycapButton: View {
+    let sourceChar: String
+    let targetChar: String?
+    let action: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    private var isMapped: Bool {
+        if let targetChar = targetChar, !targetChar.isEmpty {
+            return true
+        }
+        return false
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                // Top-left legend: source character (like secondary language on Apple keycaps)
+                VStack {
+                    HStack {
+                        Text(sourceChar)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(isHovered ? .primary : .secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                        Spacer(minLength: 0)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 4)
+                .padding(.leading, 6)
+
+                // Subtle diagonal cue in center
+                Image(systemName: "arrow.down.right")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(
+                        isHovered
+                            ? Color.accentColor.opacity(0.75)
+                            : Color.secondary.opacity(isMapped ? 0.25 : 0.12)
+                    )
+
+                // Bottom-right legend: mapped target character
+                VStack {
+                    Spacer(minLength: 0)
+                    HStack {
+                        Spacer(minLength: 0)
+                        Text(targetChar ?? "—")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(
+                                isMapped
+                                    ? .accentColor
+                                    : Color.secondary.opacity(0.35)
+                            )
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                }
+                .padding(.bottom, 3.5)
+                .padding(.trailing, 6)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(
+                ZStack {
+                    // Bottom 3D keycap skirt / bevel
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(
+                            isHovered
+                                ? Color.accentColor.opacity(0.38)
+                                : Color.black.opacity(isMapped ? 0.18 : 0.10)
+                        )
+                        .offset(y: 2)
+
+                    // Base window color backing
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(Color(NSColor.windowBackgroundColor).opacity(isMapped ? 1.0 : 0.55))
+
+                    // Subtle top-to-bottom keycap surface gradient
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: isHovered
+                                    ? [Color.accentColor.opacity(0.14), Color.accentColor.opacity(0.06)]
+                                    : [Color.white.opacity(0.65), Color.black.opacity(0.025)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+
+                    // Crisp keycap border
+                    RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                        .stroke(
+                            isHovered
+                                ? Color.accentColor.opacity(0.85)
+                                : Color.primary.opacity(isMapped ? 0.14 : 0.07),
+                            lineWidth: isHovered ? 1.5 : 0.8
+                        )
+                }
+            )
+            .offset(y: isHovered ? -0.5 : 0)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+}
+
+// MARK: - Unified Mapping Row (used in both Extra and Word Substitutions)
+
+struct MappingListRow: View {
+    let source: String
+    let target: String
+    var modifier: KeyboardLayoutUtility.Modifier? = nil
+    var isBidirectional: Bool = false
+    var sourceWidth: CGFloat? = nil
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    private func modifierDisplayName(for mod: KeyboardLayoutUtility.Modifier) -> String {
+        switch mod {
+        case .none: return String(localized: "No modifier")
+        case .shift: return "Shift"
+        case .option: return "Option"
+        case .shiftOption: return String(localized: "Shift + Option")
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Clickable main area (opens Edit sheet)
+            Button(action: onEdit) {
+                HStack(spacing: 8) {
+                    Group {
+                        if let width = sourceWidth {
+                            Text(source)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.primary)
+                                .frame(minWidth: width, alignment: .leading)
+                                .lineLimit(1)
+                        } else {
+                            Text(source)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Image(systemName: isBidirectional ? "arrow.left.and.right" : "arrow.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(isBidirectional ? .accentColor : .secondary)
+                        .frame(width: 16)
+
+                    Text(target)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(.accentColor)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if isBidirectional {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.left.and.right")
+                                .font(.system(size: 8, weight: .bold))
+                            Text(String(localized: "Both ways"))
+                                .font(.caption2.weight(.medium))
+                        }
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.12))
+                        )
+                    }
+
+                    if let modifier = modifier {
+                        Text(modifierDisplayName(for: modifier))
+                            .font(.caption2.weight(.medium))
+                            .foregroundColor(modifier == .none ? .secondary : .accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(modifier == .none ? Color.secondary.opacity(0.12) : Color.accentColor.opacity(0.14))
+                            )
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Single clean delete icon
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(isHovered ? .red.opacity(0.85) : .secondary.opacity(0.65))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color.red.opacity(isHovered ? 0.08 : 0))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(String(localized: "Delete"))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    isHovered
+                        ? Color.accentColor.opacity(0.10)
+                        : Color(NSColor.windowBackgroundColor).opacity(0.85)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(
+                    isHovered
+                        ? Color.accentColor.opacity(0.45)
+                        : Color.primary.opacity(0.08),
+                    lineWidth: 1
+                )
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 }

@@ -42,16 +42,26 @@ final class KeyboardManager {
 
     // Word-level substitution buffer
     private var wordBuffer: String = ""
-    /// The separator char (space, punctuation, newline…) that ended the most
-    /// recent word. Kept so we can retype it after a word substitution
-    /// replaces the typed word — without it we'd lose the user's space.
-    private var lastSeparator: String = " "
+    /// True while we are programmatically sending backspaces + Cmd+V so
+    /// our own synthetic events do not mutate `wordBuffer`.
+    private var isReplacingWord = false
     /// Last layout we switched TO (via Cmd/Option tap or initial). Used as
     /// a fallback when the live layout query returns something we don't know.
     private var currentLayoutID: String = ""
 
     // Key codes
     private let deleteKeyCode: Int = Constants.KeyCode.delete // kVK_Delete (backspace)
+
+    private init() {
+        // Clear word buffer whenever the user switches active applications
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.wordBuffer.removeAll()
+        }
+    }
 
     func startMonitoring(suppressEvents: Bool = false) {
         // If already monitoring, check if we need to recreate the tap
@@ -78,6 +88,13 @@ final class KeyboardManager {
             options: tapOptions,
             eventsOfInterest: CGEventMask(mask),
             callback: { (_, type, event, _) -> Unmanaged<CGEvent>? in
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let tap = KeyboardManager.shared.eventTap {
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                        print("⚠️ [KeyboardManager] Event tap re-enabled after timeout")
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
                 return KeyboardManager.shared.handle(type: type, event: event)
             },
             userInfo: nil
@@ -122,6 +139,11 @@ final class KeyboardManager {
         let now = CFAbsoluteTimeGetCurrent()
         let switchMod = SettingsManager.shared.switchModifier
 
+        // Ignore synthetic keystrokes while we are actively replacing a word
+        if isReplacingWord {
+            return Unmanaged.passUnretained(event)
+        }
+
         // 1) Any regular key during switch-modifier -> cancel
         if type == .keyDown {
             if leftCmd.isDown { leftCmd.cancelled = true }
@@ -139,17 +161,38 @@ final class KeyboardManager {
                     rememberCurrentWord()
                     return nil
                 }
-                // Only treat as text if no Cmd/Ctrl/Opt is held. Otherwise
-                // shortcuts like ⌘C would be appended to the buffer.
-                let nonTextModifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate]
-                if flags.intersection(nonTextModifiers).isEmpty,
-                   let scalar = unicodeScalar(forKeyCode: keyCode, flags: flags) {
-                    if isWordSeparator(scalar) {
-                        lastSeparator = String(scalar)
-                        commitWordBuffer()
-                    } else {
-                        wordBuffer.append(Character(scalar))
+
+                // Backspace: pop last character from buffer
+                if keyCode == deleteKeyCode {
+                    if !wordBuffer.isEmpty {
+                        wordBuffer.removeLast()
                     }
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // Navigation / Escape / Tab keys: clear word buffer
+                if isBufferResetKey(keyCode) {
+                    wordBuffer.removeAll()
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // Only treat as text if no Cmd/Ctrl/Opt is held. Otherwise
+                // shortcuts like ⌘C or ⌘Z reset the buffer.
+                let nonTextModifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate]
+                if flags.intersection(nonTextModifiers).isEmpty {
+                    if let scalar = unicodeScalar(forKeyCode: keyCode, flags: flags, event: event) {
+                        if isWordSeparator(scalar) {
+                            if tryCommitWordBuffer(separator: String(scalar)) {
+                                // Separator event is suppressed; replacement + separator
+                                // will be pasted asynchronously.
+                                return nil
+                            }
+                        } else {
+                            wordBuffer.append(Character(scalar))
+                        }
+                    }
+                } else {
+                    wordBuffer.removeAll()
                 }
             }
             return Unmanaged.passUnretained(event)
@@ -311,7 +354,7 @@ final class KeyboardManager {
     }
 
     func switchToLayout(named: String) {
-        if named == "None" { return }
+        if named == Constants.Default.noneLanguage { return }
 
         let sources = TISCreateInputSourceList(nil, false).takeRetainedValue() as! [TISInputSource]
         for s in sources {
@@ -326,6 +369,25 @@ final class KeyboardManager {
     }
 
     // MARK: - Word-level substitution
+
+    /// Keys that move the cursor or cancel typing without inserting text.
+    private func isBufferResetKey(_ keyCode: Int) -> Bool {
+        switch keyCode {
+        case Constants.KeyCode.leftArrow,
+             Constants.KeyCode.rightArrow,
+             Constants.KeyCode.upArrow,
+             Constants.KeyCode.downArrow,
+             Constants.KeyCode.escape,
+             Constants.KeyCode.home,
+             Constants.KeyCode.end,
+             Constants.KeyCode.pageUp,
+             Constants.KeyCode.pageDown,
+             Constants.KeyCode.forwardDelete:
+            return true
+        default:
+            return false
+        }
+    }
 
     /// Characters that end a word buffer.
     private func isWordSeparator(_ scalar: Unicode.Scalar) -> Bool {
@@ -342,64 +404,88 @@ final class KeyboardManager {
     }
 
     /// Translate a key code + modifier flags into a Unicode scalar using
-    /// the current keyboard layout via UCKeyTranslate. Returns nil for
-    /// non-printable keys (function keys, modifiers, etc).
-    private func unicodeScalar(forKeyCode keyCode: Int, flags: CGEventFlags) -> Unicode.Scalar? {
-        // Modifier mask for UCKeyTranslate (Carbon HIToolbox)
-        var mods: UInt32 = 0
-        if flags.contains(.maskShift)    { mods |= Constants.ModifierMask.shift }
-        if flags.contains(.maskAlternate) { mods |= Constants.ModifierMask.option }
-        if flags.contains(.maskControl)  { mods |= Constants.ModifierMask.control }
-        if flags.contains(.maskCommand)  { mods |= Constants.ModifierMask.command }
-        // Caps Lock: 0x10000 — not exposed via CGEventFlags in this position; skip.
+    /// the current keyboard layout via UCKeyTranslate (with proper UCTModifier
+    /// bitmasks) and falling back to the CGEvent's native Unicode string.
+    private func unicodeScalar(forKeyCode keyCode: Int, flags: CGEventFlags, event: CGEvent) -> Unicode.Scalar? {
+        // 1) UCKeyTranslate expects the compact UCTModifier bitfield (shift = 0x02, option = 0x08)
+        var mods: UInt32 = Constants.UCTModifier.none
+        if flags.contains(.maskShift)     { mods |= Constants.UCTModifier.shift }
+        if flags.contains(.maskAlternate) { mods |= Constants.UCTModifier.option }
 
-        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
-            return nil
+        let inputSource = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue()
+            ?? TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+
+        if let source = inputSource,
+           let layoutDataPtr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) {
+            let layoutData = Unmanaged<CFData>.fromOpaque(layoutDataPtr).takeUnretainedValue() as Data
+            if let layoutPtr = layoutData.withUnsafeBytes({ $0.baseAddress }) {
+                let layout = layoutPtr.assumingMemoryBound(to: UCKeyboardLayout.self)
+                var deadKeyState: UInt32 = 0
+                let maxStringLength = 4
+                var chars = [UniChar](repeating: 0, count: maxStringLength)
+                var actualLength: Int = 0
+
+                let status = UCKeyTranslate(
+                    layout,
+                    UInt16(keyCode),
+                    UInt16(kUCKeyActionDown),
+                    mods,
+                    UInt32(LMGetKbdType()),
+                    UInt32(kUCKeyTranslateNoDeadKeysBit),
+                    &deadKeyState,
+                    maxStringLength,
+                    &actualLength,
+                    &chars
+                )
+
+                if status == noErr, actualLength > 0 {
+                    let raw = String(utf16CodeUnits: &chars, count: actualLength)
+                    if let scalar = raw.unicodeScalars.first {
+                        return scalar
+                    }
+                }
+            }
         }
-        guard let layoutDataPtr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
-            return nil
+
+        // 2) Fallback: read the Unicode string directly attached to the CGEvent
+        var length = 0
+        event.keyboardGetUnicodeString(maxStringLength: 0, actualStringLength: &length, unicodeString: nil)
+        if length > 0 {
+            var buffer = [UniChar](repeating: 0, count: length)
+            event.keyboardGetUnicodeString(maxStringLength: length, actualStringLength: &length, unicodeString: &buffer)
+            let str = String(utf16CodeUnits: buffer, count: length)
+            return str.unicodeScalars.first
         }
-        let layoutData = Unmanaged<CFData>.fromOpaque(layoutDataPtr).takeUnretainedValue() as Data
-        guard let layoutPtr = layoutData.withUnsafeBytes({ $0.baseAddress }) else { return nil }
-        let layout = layoutPtr.assumingMemoryBound(to: UCKeyboardLayout.self)
 
-        var deadKeyState: UInt32 = 0
-        let maxStringLength = 4
-        var chars = [UniChar](repeating: 0, count: maxStringLength)
-        var actualLength: Int = 0
-
-        let status = UCKeyTranslate(
-            layout,
-            UInt16(keyCode),
-            UInt16(kUCKeyActionDown),
-            mods,
-            UInt32(LMGetKbdType()),
-            UInt32(kUCKeyTranslateNoDeadKeysBit),
-            &deadKeyState,
-            maxStringLength,
-            &actualLength,
-            &chars
-        )
-
-        guard status == noErr, actualLength > 0 else { return nil }
-        let raw = String(utf16CodeUnits: &chars, count: actualLength)
-        return raw.unicodeScalars.first
+        return nil
     }
 
     /// End-of-word: try to find a match and auto-replace.
-    private func commitWordBuffer() {
+    /// Returns `true` if a substitution was found and scheduled (caller should suppress separator event).
+    private func tryCommitWordBuffer(separator: String) -> Bool {
         let word = wordBuffer
         wordBuffer = ""
-        let separator = lastSeparator
         guard word.count >= Constants.WordSub.minAutoReplaceLength,
-              word.contains(where: { $0.isLetter }) else { return }
-        guard let pair = currentActivePair() else { return }
-        guard let result = WordMapperStore.shared.findMatch(word: word, pair: pair) else { return }
-        replaceTypedWord(
-            originalLength: word.count,
-            separator: separator,
-            with: result.replacement
-        )
+              word.contains(where: { $0.isLetter }) else { return false }
+        guard let pair = currentActivePair() else { return false }
+        guard let result = WordMapperStore.shared.findMatch(word: word, pair: pair) else { return false }
+
+        let wordLength = word.count
+        let replacement = result.replacement
+
+        print("✨ [WordSub] Auto-replacing \"\(word)\" → \"\(replacement)\"")
+
+        // Perform deletion + paste asynchronously on main thread so the event tap
+        // callback returns `nil` immediately (suppressing the separator key).
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.replaceTypedWord(
+                originalLength: wordLength,
+                separator: separator,
+                with: replacement
+            )
+        }
+        return true
     }
 
     /// Configurable hotkey handler. Saves the currently buffered word; if the
@@ -413,14 +499,20 @@ final class KeyboardManager {
             wordBuffer = ""
             if let pair = currentActivePair() {
                 saveWordAsMapping(word, pair: pair)
-                // Also do the actual replacement at the cursor
                 let other = applyCharacterMapping(word, from: pair.from, to: pair.to)
                 if !other.isEmpty && other != word {
-                    for _ in 0..<word.count {
-                        simulateKeyDownUp(keyCode: deleteKeyCode, modifierFlags: [])
-                        usleep(Constants.Timing.backspaceDelayUs)
+                    let wordLength = word.count
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.isReplacingWord = true
+                        for _ in 0..<wordLength {
+                            self.simulateKeyDownUp(keyCode: self.deleteKeyCode, modifierFlags: [])
+                            usleep(Constants.Timing.backspaceDelayUs)
+                        }
+                        usleep(Constants.Timing.keySequenceDelayUs)
+                        self.pasteText(other)
+                        self.isReplacingWord = false
                     }
-                    pasteText(other)
                 }
             }
             return
@@ -438,7 +530,9 @@ final class KeyboardManager {
             // Also replace the selection (still active after Cmd+C).
             let other = self.applyCharacterMapping(token, from: pair.from, to: pair.to)
             if !other.isEmpty && other != token {
+                self.isReplacingWord = true
                 self.pasteText(other)
+                self.isReplacingWord = false
             }
         }
     }
@@ -462,7 +556,10 @@ final class KeyboardManager {
         let settings = SettingsManager.shared
         let left = settings.leftCommandLanguage
         let right = settings.rightCommandLanguage
-        guard !left.isEmpty, !right.isEmpty, left != "None", right != "None", left != right else {
+        guard !left.isEmpty, !right.isEmpty,
+              left != Constants.Default.noneLanguage,
+              right != Constants.Default.noneLanguage,
+              left != right else {
             return nil
         }
         // Use the live layout first (handles the common case of typing
@@ -484,22 +581,21 @@ final class KeyboardManager {
         return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
     }
 
-    /// Erase `originalLength` chars + the trailing separator, then paste
-    /// `replacement + separator` via the clipboard. The keyboard layout is
-    /// not changed — the paste goes through the system pasteboard so the
-    /// replacement works regardless of which layout the user is currently
-    /// in.
+    /// Erase `originalLength` chars (since the separator key event was already
+    /// suppressed), then paste `replacement + separator` via the clipboard.
     private func replaceTypedWord(
         originalLength: Int,
         separator: String,
         with replacement: String
     ) {
-        let totalDelete = originalLength + separator.count
-        for _ in 0..<totalDelete {
+        isReplacingWord = true
+        for _ in 0..<originalLength {
             simulateKeyDownUp(keyCode: deleteKeyCode, modifierFlags: [])
             usleep(Constants.Timing.backspaceDelayUs)
         }
+        usleep(Constants.Timing.keySequenceDelayUs)
         pasteText(replacement + separator)
+        isReplacingWord = false
     }
 
     private func simulateKeyDownUp(keyCode: Int, modifierFlags: CGEventFlags) {
@@ -508,13 +604,13 @@ final class KeyboardManager {
         let up = CGEvent(keyboardEventSource: source, virtualKey: UInt16(keyCode), keyDown: false)
         down?.flags = modifierFlags
         up?.flags = modifierFlags
-        down?.post(tap: .cghidEventTap)
+        down?.post(tap: .cgAnnotatedSessionEventTap)
         usleep(Constants.Timing.keyDownUpDelayUs)
-        up?.post(tap: .cghidEventTap)
+        up?.post(tap: .cgAnnotatedSessionEventTap)
     }
 
-    /// Send a Cmd+V key event. The `flags = .maskCommand` on both events
-    /// tells the target app to treat this as a paste shortcut.
+    /// Send a Cmd+V key event to `.cgAnnotatedSessionEventTap` so it goes
+    /// directly to the target app without re-entering our HID event tap.
     private func simulateCmdV() {
         let source = CGEventSource(stateID: .combinedSessionState)
         let vKey = UInt16(Constants.KeyCode.v)
@@ -522,18 +618,17 @@ final class KeyboardManager {
         let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
         down?.flags = .maskCommand
         up?.flags = .maskCommand
-        down?.post(tap: .cghidEventTap)
+        down?.post(tap: .cgAnnotatedSessionEventTap)
         usleep(Constants.Timing.keyDownUpDelayUs)
-        up?.post(tap: .cghidEventTap)
+        up?.post(tap: .cgAnnotatedSessionEventTap)
     }
 
     /// Set `text` on the pasteboard, simulate Cmd+V, then restore the
-    /// original pasteboard contents a moment later. We use paste (not
-    /// per-char key events in a switched layout) so the replacement works
-    /// in any layout and the user stays in whatever layout they were in.
+    /// original pasteboard contents a moment later.
     private func pasteText(_ text: String) {
         let savedState = ClipboardManager.shared.saveState()
         ClipboardManager.shared.setString(text)
+        usleep(Constants.Timing.keySequenceDelayUs)
 
         // If the user is currently holding a hotkey modifier (e.g. ⌘⇧ from
         // the word-remember hotkey), our Cmd+V would be interpreted as
@@ -549,6 +644,7 @@ final class KeyboardManager {
             }
         } else {
             simulateCmdV()
+            usleep(Constants.Timing.pasteSettleUs)
         }
 
         // Restore the original clipboard once the paste has had time to
@@ -561,25 +657,38 @@ final class KeyboardManager {
         }
     }
 
-    /// Apply the character-level preset for `from → to` to `word` char by char.
+    /// Apply the character-level preset for `from ↔ to` to `word` char by char.
     /// Prefers the user-selected preset for the pair, falling back to any
-    /// preset registered for the pair.
+    /// preset registered for the pair, and automatically inverts when typing in `active.toLayout`.
     private func applyCharacterMapping(_ word: String, from: String, to: String) -> String {
         let store = MapperStore.shared
         let settings = SettingsManager.shared
         let pair = LayoutPair(from: from, to: to)
-        let pairKey = Constants.WordSub.pairKey(from: from, to: to)
+        let presets = store.presets(for: pair)
 
         let active: LayoutMapperPreset?
-        if let presetID = settings.selectedPresetIds[pairKey],
-           let preset = store.preset(byID: presetID) {
+        if let presetID = settings.selectedPresetId(for: from, to),
+           let preset = presets.first(where: { $0.id == presetID }) {
             active = preset
         } else {
-            active = store.presets(for: pair).first
+            active = presets.first
         }
         guard let active = active else { return word }
 
-        let mapping = active.characterMapping()
+        let forwardMap = active.characterMapping()
+        let mapping: [Character: String]
+        if active.fromLayout == from {
+            mapping = forwardMap
+        } else {
+            var reversed: [Character: String] = [:]
+            for (k, v) in forwardMap where v.count == 1 {
+                if let first = v.first {
+                    reversed[first] = String(k)
+                }
+            }
+            mapping = reversed
+        }
+
         var result = ""
         for ch in word {
             if let mapped = mapping[ch] {
@@ -612,9 +721,9 @@ final class KeyboardManager {
             let up = CGEvent(keyboardEventSource: source, virtualKey: cKey, keyDown: false)
             down?.flags = .maskCommand
             up?.flags = .maskCommand
-            down?.post(tap: .cghidEventTap)
+            down?.post(tap: .cgAnnotatedSessionEventTap)
             usleep(Constants.Timing.captureKeyDelayUs)
-            up?.post(tap: .cghidEventTap)
+            up?.post(tap: .cgAnnotatedSessionEventTap)
 
             // Wait up to captureTimeoutSec for the target app to write to the pasteboard.
             let deadline = Date().addingTimeInterval(Constants.Timing.captureTimeoutSec)

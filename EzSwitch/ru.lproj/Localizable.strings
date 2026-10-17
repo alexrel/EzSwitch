@@ -99,3 +99,35 @@
 /* Sections */
 "No modifier (base)" = "Без модификаторов";
 "With Shift held" = "С зажатым Shift";
+
+/* Word Substitutions */
+"Word Substitutions" = "Замена слов";
+"Add Word Substitution" = "Добавить замену слова";
+"Edit Word Substitution" = "Редактировать замену слова";
+"Direction:" = "Направление:";
+"Source (typed in):" = "Исходное слово (печатается в):";
+"Target (replaced with):" = "Замена (меняется на):";
+"Save both ways (also adds the reverse)" = "Сохранить в обе стороны (также добавит обратную замену)";
+"e.g. пше" = "напр. пше";
+"e.g. git" = "напр. git";
+"e.g. lf" = "напр. lf";
+"e.g. да" = "напр. да";
+"Auto-replace" = "Автозамена";
+"Swap From and To layouts" = "Поменять языки местами";
+"Character Mappings" = "Маппинг символов";
+"words" = "слов";
+"Click any key to edit" = "Нажмите на клавишу для изменения";
+"Clear test text" = "Очистить тестовый текст";
+"Overwrite current mapping with auto-generated keys?" = "Перезаписать текущий маппинг автогенерацией?";
+"Clear all mapped keys in this preset?" = "Очистить все клавиши в этом пресете?";
+"Clear keys" = "Очистить клавиши";
+"Clear all keys…" = "Очистить все клавиши…";
+"Delete preset…" = "Удалить пресет…";
+"Preset actions" = "Действия с пресетом";
+"Create a new preset" = "Создать новый пресет";
+"Fill keys automatically from system layouts" = "Автоматически заполнить клавиши из системных раскладок";
+"Quick remember:" = "Быстро запомнить:";
+"No words saved yet" = "Слов пока нет";
+"%d words for current pair" = "%d слов для текущей пары";
+"EzSwitch — Custom Rules (Mappers & Words)" = "EzSwitch — Правила (мапперы и слова)";
+
