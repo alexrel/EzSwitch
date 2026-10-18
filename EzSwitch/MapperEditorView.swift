@@ -98,7 +98,6 @@ struct MapperEditorView: View {
     var onDeletePreset: (() -> Void)? = nil
 
     @ObservedObject private var store = MapperStore.shared
-    @Environment(\.dismiss) private var dismiss
 
     @State private var testInput: String = ""
     @State private var testOutput: String = ""
@@ -696,12 +695,7 @@ struct MapperEditorView: View {
 
     /// Human-readable label for the current modifier context
     private func modifierLabel(_ modifier: KeyboardLayoutUtility.Modifier) -> String {
-        switch modifier {
-        case .none: return String(localized: "No modifier")
-        case .shift: return "Shift"
-        case .option: return "Option"
-        case .shiftOption: return String(localized: "Shift + Option")
-        }
+        modifier.displayName
     }
 
     /// Quick suggestions for common mappings.
@@ -1025,41 +1019,7 @@ struct MapperEditorView: View {
 
     /// Apply mapping to test text (auto-detects forward vs reverse direction)
     private func transform(_ text: String) -> String {
-        guard !text.isEmpty else { return "" }
-        let charMap = preset.characterMapping()
-
-        // Count forward vs reverse character matches so testing works in either language
-        var forwardHits = 0
-        var reverseHits = 0
-        var reverseMap: [Character: String] = [:]
-        for (k, v) in charMap where v.count == 1 {
-            if let first = v.first {
-                reverseMap[first] = String(k)
-            }
-        }
-        for ch in text {
-            let inForward = charMap[ch] != nil && charMap[ch] != String(ch)
-            let inReverse = reverseMap[ch] != nil && reverseMap[ch] != String(ch)
-            if inForward && !inReverse { forwardHits += 1 }
-            if inReverse && !inForward { reverseHits += 1 }
-        }
-
-        let activeMap = (reverseHits > forwardHits) ? reverseMap : charMap
-        var result = ""
-        result.reserveCapacity(text.count)
-        for char in text {
-            if let mapped = activeMap[char] {
-                result.append(mapped)
-            } else {
-                result.append(char)
-            }
-        }
-        // Apply extra mappings (simple substitution for any matching source char)
-        for extra in preset.extraMappings {
-            guard !extra.source.isEmpty, !extra.target.isEmpty else { continue }
-            result = result.replacingOccurrences(of: extra.source, with: extra.target)
-        }
-        return result
+        preset.transform(text)
     }
 }
 
@@ -1188,15 +1148,6 @@ struct MappingListRow: View {
 
     @State private var isHovered: Bool = false
 
-    private func modifierDisplayName(for mod: KeyboardLayoutUtility.Modifier) -> String {
-        switch mod {
-        case .none: return String(localized: "No modifier")
-        case .shift: return "Shift"
-        case .option: return "Option"
-        case .shiftOption: return String(localized: "Shift + Option")
-        }
-    }
-
     var body: some View {
         HStack(spacing: 8) {
             // Clickable main area (opens Edit sheet)
@@ -1262,7 +1213,7 @@ struct MappingListRow: View {
                     }
 
                     if let modifier = modifier {
-                        Text(modifierDisplayName(for: modifier))
+                        Text(modifier.displayName)
                             .font(.caption2.weight(.medium))
                             .foregroundColor(modifier == .none ? .secondary : .accentColor)
                             .padding(.horizontal, 6)

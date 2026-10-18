@@ -66,11 +66,11 @@ class StatusBarController: NSObject {
         status += accessibility ? String(localized: "✅ Access granted") : String(localized: "❌ Permissions required")
         
         if settings.commandSwitchEnabled {
-            status += "\n\n⌘ Command:"
-            if settings.leftCommandLanguage != "None" {
+            status += "\n\n\(settings.switchModifier.displayName):"
+            if settings.leftCommandLanguage != Constants.Default.noneLanguage {
                 status += "\n  Left → \(settings.leftCommandLanguage)"
             }
-            if settings.rightCommandLanguage != "None" {
+            if settings.rightCommandLanguage != Constants.Default.noneLanguage {
                 status += "\n  Right → \(settings.rightCommandLanguage)"
             }
         }

@@ -23,8 +23,8 @@ final class WordMapperStore: ObservableObject {
 
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "com.ezswitch.wordmapperstore", qos: .userInitiated)
-    private let modifiersDefaultsKey = "wordMappingsModifiers"
-    private let switchLayoutsDefaultsKey = "wordMappingsSwitchLayouts"
+    private let modifiersDefaultsKey = Constants.DefaultsKey.wordMappingsModifiers
+    private let switchLayoutsDefaultsKey = Constants.DefaultsKey.wordMappingsSwitchLayouts
 
     private init() {
         loadFromDisk()

@@ -73,24 +73,16 @@ struct MapperSettingsView: View {
         .onAppear {
             reloadLayouts()
             if fromLayout.isEmpty {
-                let savedFrom = UserDefaults.standard.string(forKey: "lastMapperFromLayout")
-                if let savedFrom = savedFrom, availableLayouts.contains(savedFrom) {
-                    fromLayout = savedFrom
-                } else {
-                    fromLayout = settings.leftCommandLanguage != Constants.Default.noneLanguage
+                fromLayout = savedLayout(forKey: Constants.DefaultsKey.lastMapperFromLayout)
+                    ?? (settings.leftCommandLanguage != Constants.Default.noneLanguage
                         ? settings.leftCommandLanguage
-                        : Constants.Default.leftLanguage
-                }
+                        : Constants.Default.leftLanguage)
             }
             if toLayout.isEmpty {
-                let savedTo = UserDefaults.standard.string(forKey: "lastMapperToLayout")
-                if let savedTo = savedTo, availableLayouts.contains(savedTo) {
-                    toLayout = savedTo
-                } else {
-                    toLayout = settings.rightCommandLanguage != Constants.Default.noneLanguage
+                toLayout = savedLayout(forKey: Constants.DefaultsKey.lastMapperToLayout)
+                    ?? (settings.rightCommandLanguage != Constants.Default.noneLanguage
                         ? settings.rightCommandLanguage
-                        : Constants.Default.rightLanguage
-                }
+                        : Constants.Default.rightLanguage)
             }
             mode = initialMode
             working = selectPresetForCurrentPair()
@@ -101,11 +93,11 @@ struct MapperSettingsView: View {
             }
         }
         .onChange(of: fromLayout) { _, newVal in
-            UserDefaults.standard.set(newVal, forKey: "lastMapperFromLayout")
+            UserDefaults.standard.set(newVal, forKey: Constants.DefaultsKey.lastMapperFromLayout)
             working = selectPresetForCurrentPair()
         }
         .onChange(of: toLayout) { _, newVal in
-            UserDefaults.standard.set(newVal, forKey: "lastMapperToLayout")
+            UserDefaults.standard.set(newVal, forKey: Constants.DefaultsKey.lastMapperToLayout)
             working = selectPresetForCurrentPair()
         }
         .sheet(isPresented: $showNewSheet) {
@@ -255,16 +247,18 @@ struct MapperSettingsView: View {
 
     // MARK: - Helpers
 
+    /// Restore a previously used layout, but only if it is still installed.
+    private func savedLayout(forKey key: String) -> String? {
+        guard let saved = UserDefaults.standard.string(forKey: key),
+              availableLayouts.contains(saved) else { return nil }
+        return saved
+    }
+
     private var layoutOptions: [String] {
-        var set = Set(availableLayouts)
-        set.insert(noneOption)
-        if !fromLayout.isEmpty { set.insert(fromLayout) }
-        if !toLayout.isEmpty { set.insert(toLayout) }
-        return Array(set).sorted { a, b in
-            if a == noneOption { return true }
-            if b == noneOption { return false }
-            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-        }
+        KeyboardLayoutUtility.layoutOptions(
+            availableLayouts,
+            including: [fromLayout, toLayout]
+        )
     }
 
     private func reloadLayouts() {

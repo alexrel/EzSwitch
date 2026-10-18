@@ -58,14 +58,19 @@ final class KeyboardManager {
             currentLayoutID = initial
         }
 
-        // Observe layout changes system-wide from Carbon / macOS
+        // Observe layout changes system-wide from Carbon / macOS.
+        // The distributed notification is delivered on an arbitrary thread,
+        // while `currentLayoutID` / `previousLayoutID` are read from the main
+        // thread (event tap, SwiftUI) — hop to main before touching them.
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDistributedCenter(),
             Unmanaged.passUnretained(self).toOpaque(),
             { _, observer, _, _, _ in
                 guard let observer = observer else { return }
-                let manager = Unmanaged<KeyboardManager>.fromOpaque(observer).takeUnretainedValue()
-                _ = manager.currentLayoutName()
+                DispatchQueue.main.async {
+                    let manager = Unmanaged<KeyboardManager>.fromOpaque(observer).takeUnretainedValue()
+                    _ = manager.currentLayoutName()
+                }
             },
             kTISNotifySelectedKeyboardInputSourceChanged,
             nil,
@@ -590,8 +595,9 @@ final class KeyboardManager {
     }
 
     /// The pair whose `from` is the current layout. If the current layout is
-    /// the "to" side, returns the inverse pair. Returns nil if the current
-    /// layout doesn't match either side of the configured pair.
+    /// the "to" side, returns the inverse pair. Returns nil when the current
+    /// layout is neither side (e.g. a third language is active) — guessing a
+    /// direction there would replace words against the wrong dictionary.
     private func currentActivePair() -> LayoutPair? {
         let settings = SettingsManager.shared
         let left = settings.leftCommandLanguage
@@ -599,15 +605,16 @@ final class KeyboardManager {
         guard !left.isEmpty, !right.isEmpty,
               left != Constants.Default.noneLanguage,
               right != Constants.Default.noneLanguage,
-              left != right else {
+              !LayoutPair.namesMatch(left, right) else {
             return nil
         }
         // Use the live layout first (handles the common case of typing
-        // without ever tapping Cmd), fall back to the cached value.
+        // without ever tapping the switch modifier), fall back to the cached
+        // value.
         let current = currentLayoutName() ?? currentLayoutID
-        if current == left { return LayoutPair(from: left, to: right) }
-        if current == right { return LayoutPair(from: right, to: left) }
-        return LayoutPair(from: left, to: right)
+        if LayoutPair.namesMatch(current, left) { return LayoutPair(from: left, to: right) }
+        if LayoutPair.namesMatch(current, right) { return LayoutPair(from: right, to: left) }
+        return nil
     }
 
     /// Localized name of the keyboard layout currently driving key events.
@@ -644,28 +651,13 @@ final class KeyboardManager {
     }
 
     private func simulateKeyDownUp(keyCode: Int, modifierFlags: CGEventFlags) {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: source, virtualKey: UInt16(keyCode), keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: UInt16(keyCode), keyDown: false)
-        down?.flags = modifierFlags
-        up?.flags = modifierFlags
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        usleep(Constants.Timing.keyDownUpDelayUs)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
+        CGEventSynthesizer.press(keyCode, flags: modifierFlags)
     }
 
     /// Send a Cmd+V key event to `.cgAnnotatedSessionEventTap` so it goes
     /// directly to the target app without re-entering our HID event tap.
     private func simulateCmdV() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let vKey = UInt16(Constants.KeyCode.v)
-        let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
-        down?.flags = .maskCommand
-        up?.flags = .maskCommand
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        usleep(Constants.Timing.keyDownUpDelayUs)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
+        CGEventSynthesizer.pressCommand(Constants.KeyCode.v)
     }
 
     /// Set `text` on the pasteboard, simulate Cmd+V, then restore the
@@ -720,20 +712,7 @@ final class KeyboardManager {
         }
         guard let active = active else { return word }
 
-        let forwardMap = active.characterMapping()
-        let mapping: [Character: String]
-        if active.fromLayout == from {
-            mapping = forwardMap
-        } else {
-            var reversed: [Character: String] = [:]
-            for (k, v) in forwardMap where v.count == 1 {
-                if let first = v.first {
-                    reversed[first] = String(k)
-                }
-            }
-            mapping = reversed
-        }
-
+        let mapping = active.mapping(from: from)
         var result = ""
         for ch in word {
             if let mapped = mapping[ch] {
@@ -760,15 +739,10 @@ final class KeyboardManager {
             }
 
             // Simulate Cmd+C
-            let source = CGEventSource(stateID: .combinedSessionState)
-            let cKey = UInt16(Constants.KeyCode.c)
-            let down = CGEvent(keyboardEventSource: source, virtualKey: cKey, keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: cKey, keyDown: false)
-            down?.flags = .maskCommand
-            up?.flags = .maskCommand
-            down?.post(tap: .cgAnnotatedSessionEventTap)
-            usleep(Constants.Timing.captureKeyDelayUs)
-            up?.post(tap: .cgAnnotatedSessionEventTap)
+            CGEventSynthesizer.pressCommand(
+                Constants.KeyCode.c,
+                delayUs: Constants.Timing.captureKeyDelayUs
+            )
 
             // Wait up to captureTimeoutSec for the target app to write to the pasteboard.
             let deadline = Date().addingTimeInterval(Constants.Timing.captureTimeoutSec)
@@ -789,14 +763,5 @@ final class KeyboardManager {
 
             completion(captured)
         }
-    }
-}
-
-private extension LayoutPair {
-    /// The "other" layout in the pair, relative to `current`.
-    func other(_ current: String) -> String {
-        if current == from { return to }
-        if current == to { return from }
-        return to
     }
 }

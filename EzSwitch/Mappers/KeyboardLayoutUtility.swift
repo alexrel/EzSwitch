@@ -19,6 +19,16 @@ enum KeyboardLayoutUtility {
         case shift = 0x02          // 1 << 1
         case option = 0x08         // 1 << 3
         case shiftOption = 0x0A    // shift | option
+
+        /// Human-readable label used in the editor and mapping lists.
+        var displayName: String {
+            switch self {
+            case .none: return String(localized: "No modifier")
+            case .shift: return "Shift"
+            case .option: return "Option"
+            case .shiftOption: return String(localized: "Shift + Option")
+            }
+        }
     }
 
     /// Represents a single character in a layout, with metadata
@@ -78,7 +88,23 @@ enum KeyboardLayoutUtility {
                 names.append(name)
             }
         }
-        return names
+        return Array(Set(names))
+    }
+
+    /// Sorted list of layout names for a picker, with the "None" option first
+    /// and any extra names (e.g. the currently selected pair) included even if
+    /// the layout is not enabled right now.
+    static func layoutOptions(_ names: [String], including extras: [String] = []) -> [String] {
+        var set = Set(names)
+        set.formUnion(extras.filter { !$0.isEmpty })
+        set.insert(Constants.Default.noneLanguage)
+
+        return set.sorted { a, b in
+            let none = Constants.Default.noneLanguage
+            if a == none { return b != none }
+            if b == none { return false }
+            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
     }
 
     /// Look up a character for a given key code in a specific layout with modifiers
@@ -154,36 +180,7 @@ enum KeyboardLayoutUtility {
             return []
         }
         return characterTable(for: source)
-    }
-
-    /// Reverse-lookup: find the first key code in the current (or named)
-    /// layout that produces `character`. Prefers base (no modifier) over
-    /// Shift. Used by `KeyboardManager` to type replacement characters.
-    static func reverseLookup(
-        character: Character,
-        inLayoutNamed name: String? = nil
-    ) -> CharacterEntry? {
-        let source: TISInputSource
-        if let name = name {
-            guard let s = inputSource(named: name) else { return nil }
-            source = s
-        } else {
-            guard let s = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
-                return nil
-            }
-            source = s
-        }
-        let table = characterTable(for: source)
-        if let base = table.first(where: { $0.modifier == .none && $0.character == character }) {
-            return base
-        }
-        if let shifted = table.first(where: { $0.modifier == .shift && $0.character == character }) {
-            return shifted
-        }
-        return nil
-    }
-
-    /// Extract complete character table from a TISInputSource
+    }    /// Extract complete character table from a TISInputSource
     static func characterTable(for source: TISInputSource) -> [CharacterEntry] {
         var entries: [CharacterEntry] = []
         let modifiers: [Modifier] = [.none, .shift, .option, .shiftOption]
@@ -200,6 +197,33 @@ enum KeyboardLayoutUtility {
             }
         }
         return entries
+    }
+
+    /// Translate `text` from one layout to another using the system layouts
+    /// themselves (not the saved presets) and picking the direction that best
+    /// matches the characters in `text`.
+    static func autoTranslate(_ text: String, from: String, to: String) -> String {
+        let forwardMap = buildMapping(fromLayout: from, toLayout: to)
+        let reverseMap = buildMapping(fromLayout: to, toLayout: from)
+
+        var forwardHits = 0
+        var reverseHits = 0
+        for ch in text {
+            let s = String(ch)
+            let inForward = forwardMap[s] != nil && forwardMap[s] != s
+            let inReverse = reverseMap[s] != nil && reverseMap[s] != s
+            if inForward && !inReverse { forwardHits += 1 }
+            if inReverse && !inForward { reverseHits += 1 }
+        }
+
+        let activeMap = reverseHits > forwardHits ? reverseMap : forwardMap
+        var result = ""
+        result.reserveCapacity(text.count)
+        for ch in text {
+            let s = String(ch)
+            result.append(activeMap[s] ?? s)
+        }
+        return result
     }
 
     /// Build a forward mapping (from source layout to target layout)

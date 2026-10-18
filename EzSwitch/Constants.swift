@@ -46,9 +46,6 @@ enum Constants {
         static let delete:     Int = 51         // kVK_Delete (backspace)
         static let forwardDelete: Int = 117     // kVK_ForwardDelete
         static let escape:     Int = 53         // kVK_Escape
-        static let tab:        Int = 48         // kVK_Tab
-        static let returnKey:  Int = 36         // kVK_Return
-        static let space:      Int = 49         // kVK_Space
         static let c:          Int = kVK_ANSI_C
         static let v:          Int = kVK_ANSI_V
         static let leftArrow:  Int = 0x7B       // 123
@@ -73,14 +70,12 @@ enum Constants {
         static let pasteSettleUs:        UInt32 = 20_000
         static let backspaceDelayUs:     UInt32 = 2_000
         static let betweenCharsDelayUs:  UInt32 = 3_000
-        static let layoutSwitchSettleUs: UInt32 = 20_000
 
         // Capture (Cmd+C round-trip via pasteboard)
         static let captureTimeoutSec:          TimeInterval = 0.35
         static let capturePollStepSec:         TimeInterval = 0.05
         static let capturePollStepUs:          UInt32 = 3_000
         static let captureSelectionTimeoutSec: TimeInterval = 0.2
-        static let captureInitialDelayUs:      UInt32 = 10_000
         static let captureKeyDelayUs:          UInt32 = 10_000
 
         // Paste (Cmd+V) — used by word sub auto-replace and hotkey training
@@ -138,6 +133,12 @@ enum Constants {
         static let selectedPresetIds          = "selectedPresetIds"
         static let enableWordSubstitution     = "enableWordSubstitution"
         static let wordRememberHotkey         = "wordRememberHotkey"
+        /// Per-word metadata stored alongside `word_mappings.json`.
+        static let wordMappingsModifiers      = "wordMappingsModifiers"
+        static let wordMappingsSwitchLayouts  = "wordMappingsSwitchLayouts"
+        /// Last layout pair used in the mapper window.
+        static let lastMapperFromLayout       = "lastMapperFromLayout"
+        static let lastMapperToLayout         = "lastMapperToLayout"
     }
 
     // MARK: - File Paths
@@ -155,13 +156,6 @@ enum Constants {
         /// Treat selections longer than this as "probably the whole line"
         /// and reject them.
         static let maxWordLength = 50
-    }
-
-    // MARK: - Unicode
-    enum Unicode {
-        /// Cyrillic block (U+0400..U+04FF).
-        static let cyrillicLower: UInt32 = 0x0400
-        static let cyrillicUpper: UInt32 = 0x04FF
     }
 
     // MARK: - Clipboard Marker

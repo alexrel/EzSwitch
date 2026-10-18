@@ -9,6 +9,21 @@ struct LayoutPair: Hashable, Codable {
         self.from = from
         self.to = to
     }
+
+    /// Compare layout names tolerantly: localized names differ in dash style
+    /// (`–` vs `—` vs `-`), letter case and surrounding whitespace.
+    /// Never compares against language keywords — any pair of layouts works.
+    static func namesMatch(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        func normalize(_ name: String) -> String {
+            name
+                .replacingOccurrences(of: "—", with: "-")
+                .replacingOccurrences(of: "–", with: "-")
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+        }
+        return normalize(a) == normalize(b)
+    }
 }
 
 /// Represents a saved mapping preset between two keyboard layouts.

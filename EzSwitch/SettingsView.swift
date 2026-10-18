@@ -1,8 +1,9 @@
 import SwiftUI
-import Carbon
 
 struct SettingsView: View {
-    @StateObject private var settings = SettingsManager.shared
+    /// `SettingsManager` is a singleton that owns its own lifetime, so this
+    /// view observes it rather than owning it with `@StateObject`.
+    @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var wordStore = WordMapperStore.shared
     @ObservedObject private var mapperStore = MapperStore.shared
 
@@ -12,7 +13,7 @@ struct SettingsView: View {
     @State private var showAboutPopover = false
     @State private var showHotkeySheet = false
 
-    private let noneOption = "None"
+    private let noneOption = Constants.Default.noneLanguage
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
@@ -27,21 +28,10 @@ struct SettingsView: View {
     }
 
     private var languagesForPicker: [String] {
-        var set = Set(availableLanguages)
-        set.insert(noneOption)
-        set.insert(settings.leftCommandLanguage)
-        set.insert(settings.rightCommandLanguage)
-
-        return Array(set).sorted { a, b in
-            if a == noneOption { return true }
-            if b == noneOption { return false }
-            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-        }
-    }
-
-    // Pre-computed current pair key for preset storage
-    private var currentPairKey: String {
-        "\(settings.leftCommandLanguage)|\(settings.rightCommandLanguage)"
+        KeyboardLayoutUtility.layoutOptions(
+            availableLanguages,
+            including: [settings.leftCommandLanguage, settings.rightCommandLanguage]
+        )
     }
 
     var body: some View {
@@ -725,51 +715,16 @@ struct SettingsView: View {
     }
 
     private func reloadAvailableLanguages() {
-        availableLanguages = Self.fetchSelectableKeyboardLayouts()
+        availableLanguages = KeyboardLayoutUtility.enabledLayoutNames()
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private static func fetchSelectableKeyboardLayouts() -> [String] {
-        let filter: [String: Any] = [
-            (kTISPropertyInputSourceCategory as String): (kTISCategoryKeyboardInputSource as String),
-            (kTISPropertyInputSourceIsSelectCapable as String): true
-        ]
-
-        guard let rawList = TISCreateInputSourceList(filter as CFDictionary, false) else {
-            return []
-        }
-
-        let list = rawList.takeRetainedValue() as NSArray
-        var names = [String]()
-        names.reserveCapacity(list.count)
-
-        for item in list {
-            let source = item as! TISInputSource
-
-            if let enabledPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) {
-                let enabledCF = Unmanaged<CFBoolean>.fromOpaque(enabledPtr).takeUnretainedValue()
-                if !CFBooleanGetValue(enabledCF) { continue }
-            }
-
-            if let namePtr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) {
-                let nameCF = Unmanaged<CFString>.fromOpaque(namePtr).takeUnretainedValue()
-                let name = nameCF as String
-                if !name.isEmpty {
-                    names.append(name)
-                }
-            }
-        }
-
-        return Array(Set(names))
-    }
-
     private func restartApplication() {
-        let url = URL(fileURLWithPath: Bundle.main.resourcePath!)
-        let path = url.deletingLastPathComponent().deletingLastPathComponent().path
+        let appURL = Bundle.main.bundleURL
         let task = Process()
-        task.launchPath = "/usr/bin/open"
-        task.arguments = [path]
-        task.launch()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = [appURL.path]
+        try? task.run()
         NSApplication.shared.terminate(nil)
     }
 }

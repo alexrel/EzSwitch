@@ -498,26 +498,6 @@ private struct WordEntrySheet: View {
     private func autoTranslateSourceToTarget() {
         let trimmed = source.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-
-        let forwardMap = KeyboardLayoutUtility.buildMapping(fromLayout: fromLayout, toLayout: toLayout)
-        let reverseMap = KeyboardLayoutUtility.buildMapping(fromLayout: toLayout, toLayout: fromLayout)
-
-        var forwardHits = 0
-        var reverseHits = 0
-        for ch in trimmed {
-            let s = String(ch)
-            let inForward = forwardMap[s] != nil && forwardMap[s] != s
-            let inReverse = reverseMap[s] != nil && reverseMap[s] != s
-            if inForward && !inReverse { forwardHits += 1 }
-            if inReverse && !inForward { reverseHits += 1 }
-        }
-
-        let activeMap = (reverseHits > forwardHits) ? reverseMap : forwardMap
-        var result = ""
-        for ch in trimmed {
-            let s = String(ch)
-            result.append(activeMap[s] ?? s)
-        }
-        target = result
+        target = KeyboardLayoutUtility.autoTranslate(trimmed, from: fromLayout, to: toLayout)
     }
 }
