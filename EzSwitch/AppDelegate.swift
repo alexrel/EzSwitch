@@ -20,12 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         //    (it reads suppressTransformKey from UserDefaults and passes
         //    `suppressEvents:` accordingly). We do NOT call startMonitoring()
         //    here unconditionally, as that would override the user's setting.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            print("🔄 Keyboard monitoring delegated to SettingsManager")
-        }
 
         // 5. If Accessibility not granted — warn user (for TextTransformer/selection)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Timing.accessibilityCheckDelaySec) {
             if !AXIsProcessTrusted() {
                 print("⚠️ No Accessibility — text transformation (AX) will not work until permission is granted.")
                 self.showAccessibilityAlert()
@@ -34,6 +31,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Flush debounced preset writes first — the termination below tears
+        // down the keyboard pipeline, and a pending write must not be lost.
+        MapperStore.shared.flush()
         // KeyboardManager stops itself on deinit, but explicit stop is safer
         KeyboardManager.shared.stopMonitoring()
     }

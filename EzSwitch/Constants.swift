@@ -15,10 +15,6 @@ enum Constants {
         static let shift:   UInt32 = 0x200
         static let option:  UInt32 = 0x40
         static let control: UInt32 = 0x1000
-
-        /// All four modifier bits as a single mask — handy for
-        /// `flags.intersection(.modifiers)`.
-        static let all: UInt32 = command | shift | option | control
     }
 
     // MARK: - UCKeyTranslate Modifier Masks
@@ -26,10 +22,9 @@ enum Constants {
     // (UnicodeUtilities.h). Not interchangeable with the HIToolbox
     // masks above.
     enum UCTModifier {
-        static let none:        UInt32 = 0
-        static let shift:       UInt32 = 0x02   // 1 << 1
-        static let option:      UInt32 = 0x08   // 1 << 3
-        static let shiftOption: UInt32 = 0x0A
+        static let none:   UInt32 = 0
+        static let shift:  UInt32 = 0x02   // 1 << 1
+        static let option: UInt32 = 0x08   // 1 << 3
     }
 
     // MARK: - Virtual Key Codes
@@ -73,7 +68,6 @@ enum Constants {
 
         // Capture (Cmd+C round-trip via pasteboard)
         static let captureTimeoutSec:          TimeInterval = 0.35
-        static let capturePollStepSec:         TimeInterval = 0.05
         static let capturePollStepUs:          UInt32 = 3_000
         static let captureSelectionTimeoutSec: TimeInterval = 0.2
         static let captureKeyDelayUs:          UInt32 = 10_000
@@ -82,8 +76,28 @@ enum Constants {
         static let pasteCmdVDeferSec:     TimeInterval = 0.1   // if hotkey modifiers still held
         static let pasteRestoreDelaySec:  TimeInterval = 0.25
 
+        // Layout switch scheduled shortly after a word replacement so the
+        // paste lands in the target app before the input source changes.
+        static let layoutSwitchDelaySec:  TimeInterval = 0.08
+
         // Clipboard restore after a transform (TextTransformer)
         static let clipboardRestoreDelay: TimeInterval = 0.12
+
+        // The preset editor saves on every keystroke; coalesce those into a
+        // single disk write once typing pauses.
+        static let persistDebounceSec:    TimeInterval = 0.4
+
+        // How long a multi-step transform cycle stays "live": transforming
+        // again within this window advances to the next layout in the plan.
+        static let cycleExpirySec:        TimeInterval = 2.5
+
+        // UI: delay before moving first-responder into a sheet's source field,
+        // giving the window a beat to finish presenting.
+        static let sheetFocusDelaySec:    TimeInterval = 0.1
+
+        // UI: delay before the launch-time Accessibility check, so the alert
+        // does not compete with the status bar finishing its setup.
+        static let accessibilityCheckDelaySec: TimeInterval = 0.8
     }
 
     // MARK: - Word Sub
@@ -133,8 +147,6 @@ enum Constants {
         static let selectedPresetIds          = "selectedPresetIds"
         static let enableWordSubstitution     = "enableWordSubstitution"
         static let wordRememberHotkey         = "wordRememberHotkey"
-        /// Per-word metadata stored alongside `word_mappings.json`.
-        static let wordMappingsModifiers      = "wordMappingsModifiers"
         static let wordMappingsSwitchLayouts  = "wordMappingsSwitchLayouts"
         /// Last layout pair used in the mapper window.
         static let lastMapperFromLayout       = "lastMapperFromLayout"
@@ -161,5 +173,12 @@ enum Constants {
     // MARK: - Clipboard Marker
     enum ClipboardMarker {
         static let prefix = "__EZ_"
+    }
+
+    // MARK: - Links
+    enum Link {
+        static let repository = URL(string: "https://github.com/alexrel/EzSwitch")!
+        /// Same repo, without the scheme — for inline display text.
+        static let repositoryDisplay = "github.com/alexrel/EzSwitch"
     }
 }

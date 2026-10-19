@@ -17,8 +17,6 @@ final class KeyboardManager {
     private let rightShiftKeyCode: Int = Constants.KeyCode.rightShift
     private let leftOptionKeyCode: Int = Constants.KeyCode.leftOption
     private let rightOptionKeyCode: Int = Constants.KeyCode.rightOption
-    private let leftCmdKeyCode: Int = Constants.KeyCode.leftCmd
-    private let rightCmdKeyCode: Int = Constants.KeyCode.rightCmd
 
     private struct KeyState {
         var isDown = false
@@ -45,6 +43,11 @@ final class KeyboardManager {
     /// True while we are programmatically sending backspaces + Cmd+V so
     /// our own synthetic events do not mutate `wordBuffer`.
     private var isReplacingWord = false
+    /// Serial queue for long synthetic-input sequences (backspaces, Cmd+C
+    /// round-trip, paste). These block for tens of milliseconds with `usleep`
+    /// and must not run on the main thread: the event tap lives on the main
+    /// run loop, so blocking main delays delivery of every real keystroke.
+    private let workQueue = DispatchQueue(label: "ezswitch.keyboard.work", qos: .userInteractive)
     /// Last layout we switched TO or currently active layout name.
     public private(set) var currentLayoutID: String = ""
     /// Previous layout before the current switch (used to determine where we came from).
@@ -158,6 +161,15 @@ final class KeyboardManager {
         print("⌨️  KeyboardManager: monitoring stopped")
     }
 
+    /// True when EzSwitch itself is the frontmost app (popover, mapper
+    /// window, hotkey recorder sheet). Word substitution must stay inert
+    /// there: the tap still sees keystrokes typed into our own text fields,
+    /// and auto-replacing them with synthetic backspaces + paste would
+    /// corrupt what the user is typing in our UI.
+    private var isFrontmostAppSelf: Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    }
+
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags
@@ -175,8 +187,9 @@ final class KeyboardManager {
             if rightCmd.isDown { rightCmd.cancelled = true }
             if transformKeyDown { transformKeyCancelled = true }
 
-            // Word-level substitution: append printable chars / commit on separator
-            if SettingsManager.shared.enableWordSubstitution {
+            // Word-level substitution: append printable chars / commit on separator.
+            // Skipped entirely while our own UI is frontmost (see isFrontmostAppSelf).
+            if SettingsManager.shared.enableWordSubstitution, !isFrontmostAppSelf {
                 // Configurable hotkey: remember the current word. Suppress the key
                 // so it doesn't appear in the target text field.
                 let hotkey = SettingsManager.shared.wordRememberHotkey
@@ -371,7 +384,10 @@ final class KeyboardManager {
             state = KeyState(isDown: true, downAt: now, cancelled: false)
         } else if !isDown && state.isDown {
             if !state.cancelled && (now - state.downAt) < commandMaxHold {
-                currentLayoutID = lang
+                // Only `switchToLayout` updates `currentLayoutID` /
+                // `previousLayoutID` — pre-assigning here would make its
+                // "previous != current" check always false and silently stop
+                // `previousLayoutID` from tracking where we came from.
                 switchToLayout(named: lang)
             }
             state.isDown = false
@@ -380,16 +396,21 @@ final class KeyboardManager {
 
     func switchToLayout(named: String) {
         if named == Constants.Default.noneLanguage { return }
-        if !currentLayoutID.isEmpty && currentLayoutID != named {
-            previousLayoutID = currentLayoutID
-        }
-        currentLayoutID = named
 
         let sources = TISCreateInputSourceList(nil, false).takeRetainedValue() as! [TISInputSource]
         for s in sources {
             if let ptr = TISGetInputSourceProperty(s, kTISPropertyLocalizedName) {
                 let name = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
-                if name == named {
+                // Compare tolerantly: system localized names differ in dash
+                // style / case from what the user picked in the settings.
+                if LayoutPair.namesMatch(name, named) {
+                    // Update tracking only after a successful select — otherwise
+                    // `currentLayoutID` would "stick" to a name that was never
+                    // actually applied when no source matched.
+                    if !currentLayoutID.isEmpty && !LayoutPair.namesMatch(currentLayoutID, named) {
+                        previousLayoutID = currentLayoutID
+                    }
+                    currentLayoutID = named
                     TISSelectInputSource(s)
                     break
                 }
@@ -505,18 +526,28 @@ final class KeyboardManager {
 
         print("✨ [WordSub] Auto-replacing \"\(word)\" → \"\(replacement)\" (targetLayout: \(targetLayout ?? "none"))")
 
-        // Perform deletion + paste asynchronously on main thread so the event tap
+        // Perform deletion + paste on a background queue: the sequence blocks
+        // for tens of milliseconds (usleep between keystrokes) and would
+        // otherwise stall key delivery on the main thread. The event-tap
         // callback returns `nil` immediately (suppressing the separator key).
-        DispatchQueue.main.async { [weak self] in
+        // `isReplacingWord` guards on the tap's thread, so flip it there too.
+        DispatchQueue.main.async { [weak self] in self?.isReplacingWord = true }
+        workQueue.async { [weak self] in
             guard let self = self else { return }
             self.replaceTypedWord(
                 originalLength: wordLength,
                 separator: separator,
                 with: replacement
             )
-            if let target = targetLayout {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                    self?.currentLayoutID = target
+            // Give the paste a moment to land before the input source flips —
+            // otherwise the target app can receive the pasted text under the
+            // new layout.
+            if targetLayout != nil {
+                Thread.sleep(forTimeInterval: Constants.Timing.layoutSwitchDelaySec)
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.isReplacingWord = false
+                if let target = targetLayout {
                     self?.switchToLayout(named: target)
                 }
             }
@@ -537,19 +568,19 @@ final class KeyboardManager {
                 let other = applyCharacterMapping(word, from: pair.from, to: pair.to)
                 if !other.isEmpty && other != word {
                     let wordLength = word.count
-                    DispatchQueue.main.async { [weak self] in
+                    DispatchQueue.main.async { [weak self] in self?.isReplacingWord = true }
+                    workQueue.async { [weak self] in
                         guard let self = self else { return }
-                        self.isReplacingWord = true
                         for _ in 0..<wordLength {
                             self.simulateKeyDownUp(keyCode: self.deleteKeyCode, modifierFlags: [])
                             usleep(Constants.Timing.backspaceDelayUs)
                         }
                         usleep(Constants.Timing.keySequenceDelayUs)
                         self.pasteText(other)
-                        self.isReplacingWord = false
+                        Thread.sleep(forTimeInterval: Constants.Timing.layoutSwitchDelaySec)
 
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                            self?.currentLayoutID = pair.to
+                        DispatchQueue.main.async { [weak self] in
+                            self?.isReplacingWord = false
                             self?.switchToLayout(named: pair.to)
                         }
                     }
@@ -570,13 +601,13 @@ final class KeyboardManager {
             // Also replace the selection (still active after Cmd+C).
             let other = self.applyCharacterMapping(token, from: pair.from, to: pair.to)
             if !other.isEmpty && other != token {
-                self.isReplacingWord = true
-                self.pasteText(other)
-                self.isReplacingWord = false
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                    self?.currentLayoutID = pair.to
-                    self?.switchToLayout(named: pair.to)
+                DispatchQueue.main.async { [weak self] in self?.isReplacingWord = true }
+                self.workQueue.async { [weak self] in
+                    self?.pasteText(other)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.isReplacingWord = false
+                        self?.switchToLayout(named: pair.to)
+                    }
                 }
             }
         }
@@ -626,7 +657,7 @@ final class KeyboardManager {
             return currentLayoutID.isEmpty ? nil : currentLayoutID
         }
         let name = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
-        if !currentLayoutID.isEmpty && currentLayoutID != name {
+        if !currentLayoutID.isEmpty && !LayoutPair.namesMatch(currentLayoutID, name) {
             previousLayoutID = currentLayoutID
         }
         currentLayoutID = name
@@ -635,19 +666,18 @@ final class KeyboardManager {
 
     /// Erase `originalLength` chars (since the separator key event was already
     /// suppressed), then paste `replacement + separator` via the clipboard.
+    /// Runs on `workQueue`; the caller owns the `isReplacingWord` guard flag.
     private func replaceTypedWord(
         originalLength: Int,
         separator: String,
         with replacement: String
     ) {
-        isReplacingWord = true
         for _ in 0..<originalLength {
             simulateKeyDownUp(keyCode: deleteKeyCode, modifierFlags: [])
             usleep(Constants.Timing.backspaceDelayUs)
         }
         usleep(Constants.Timing.keySequenceDelayUs)
         pasteText(replacement + separator)
-        isReplacingWord = false
     }
 
     private func simulateKeyDownUp(keyCode: Int, modifierFlags: CGEventFlags) {
@@ -712,56 +742,44 @@ final class KeyboardManager {
         }
         guard let active = active else { return word }
 
-        let mapping = active.mapping(from: from)
-        var result = ""
-        for ch in word {
-            if let mapped = mapping[ch] {
-                result.append(mapped)
-            } else {
-                result.append(ch)
-            }
-        }
-        return result
+        // Single shared implementation (see `LayoutMapperPreset.apply`):
+        // direction-aware, and the reverse hop inverts with longest-match so
+        // multi-character targets are not silently dropped.
+        return active.apply(word, from: from)
     }
 
     /// Round-trip the user's current selection through the pasteboard.
     /// Saves existing pasteboard contents, simulates Cmd+C, polls for the
     /// pasteboard to change, then restores the original contents.
+    ///
+    /// This is the same marker-based flow `TextTransformer` uses for its
+    /// Branch A / Branch B copies — both go through `ClipboardManager` so the
+    /// save/restore and change-detection logic exists only once.
+    /// Runs entirely off the main thread; `completion` is delivered on main.
     private func captureSelectedText(completion: @escaping (String?) -> Void) {
-        DispatchQueue.main.async {
-            let pasteboard = NSPasteboard.general
-            let savedChangeCount = pasteboard.changeCount
-            var savedContents: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in pasteboard.types ?? [] {
-                if let data = pasteboard.data(forType: type) {
-                    savedContents[type] = data
-                }
-            }
+        workQueue.async {
+            let clipboard = ClipboardManager.shared
+            let savedState = clipboard.saveState()
+            let (marker, markerCount) = clipboard.setMarker()
 
-            // Simulate Cmd+C
             CGEventSynthesizer.pressCommand(
                 Constants.KeyCode.c,
                 delayUs: Constants.Timing.captureKeyDelayUs
             )
 
-            // Wait up to captureTimeoutSec for the target app to write to the pasteboard.
-            let deadline = Date().addingTimeInterval(Constants.Timing.captureTimeoutSec)
-            var captured: String?
-            while Date() < deadline {
-                RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(Constants.Timing.capturePollStepSec))
-                if pasteboard.changeCount != savedChangeCount {
-                    captured = pasteboard.string(forType: .string)
-                    break
-                }
-            }
+            // Plain usleep polling inside `waitForChange` — deliberately NOT
+            // `RunLoop.main.run(...)`, which re-enters the main run loop from
+            // inside an event-tap callback and can reprocess queued events.
+            let captured = clipboard.waitForChange(marker: marker, markerCount: markerCount)
 
-            // Restore pasteboard (clear + replay saved types).
-            pasteboard.clearContents()
-            for (type, data) in savedContents {
-                pasteboard.setData(data, forType: type)
-            }
+            // Restore before handing the value back: the caller may immediately
+            // re-use the pasteboard (word replacement pastes through it), and a
+            // deferred restore would then race with that flow.
+            clipboard.restoreState(savedState)
 
-            completion(captured)
+            DispatchQueue.main.async {
+                completion(captured)
+            }
         }
     }
 }

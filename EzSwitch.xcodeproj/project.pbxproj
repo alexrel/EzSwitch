@@ -10,9 +10,22 @@
 		BD996D0A2F0FC00E008B29F2 /* EzSwitch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EzSwitch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		BD996D0E2F0FC00E008B29F2 /* Exceptions for "EzSwitch" folder in "EzSwitch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = BD996D092F0FC00E008B29F2 /* EzSwitch */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		BD996D0C2F0FC00E008B29F2 /* EzSwitch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				BD996D0E2F0FC00E008B29F2 /* Exceptions for "EzSwitch" folder in "EzSwitch" target */,
+			);
 			path = EzSwitch;
 			sourceTree = "<group>";
 		};
@@ -257,8 +270,8 @@
 				// DEVELOPMENT_TEAM = 2C7D4B6GA9; // Commented out for cross-machine compatibility
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EzSwitch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -284,8 +297,8 @@
 				// DEVELOPMENT_TEAM = 2C7D4B6GA9; // Commented out for cross-machine compatibility
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EzSwitch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

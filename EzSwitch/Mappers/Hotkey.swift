@@ -26,12 +26,6 @@ struct Hotkey: Codable, Equatable, Hashable {
 
     var isSet: Bool { keyCode != 0 || modifiers != 0 }
 
-    /// Human-readable label like "⌘⇧M". Falls back to localized "None" when unassigned.
-    var displayLabel: String {
-        guard isSet else { return String(localized: "None") }
-        return displayTokens.joined()
-    }
-
     /// List of individual key labels like `["⌘", "⇧", "M"]` for rendering as separate keycaps.
     /// Returns an empty array if no hotkey is set.
     var displayTokens: [String] {
@@ -57,7 +51,12 @@ struct Hotkey: Codable, Equatable, Hashable {
 
     /// True if `flags` matches our modifier set (we ignore extra modifiers
     /// the user may be holding — e.g. Caps Lock).
+    ///
+    /// An unset hotkey never matches anything: without this guard
+    /// `Hotkey.none` (keyCode 0, modifiers 0) would compare equal to a bare
+    /// keypress with no modifiers held and fire on every such key.
     func matches(flags: CGEventFlags) -> Bool {
+        guard isSet else { return false }
         // Required modifiers we expect to be set
         let need: CGEventFlags = cgFlags
         // Mask out the modifier bits we don't care about (caps lock, fn, etc.)

@@ -488,7 +488,8 @@ private struct WordEntrySheet: View {
             source = initialSource
             target = initialTarget
             switchLayout = initialSwitchLayout
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Give the sheet a beat to finish presenting before taking focus.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Timing.sheetFocusDelaySec) {
                 focusedField = .source
             }
         }

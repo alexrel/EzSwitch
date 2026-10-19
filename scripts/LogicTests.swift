@@ -87,10 +87,14 @@ func testPresetTransform() {
     ]
     equal(withExtra.transform("привет"), "HELLO", "extra mapping applied after transform")
 
-    // mapping(from:) returns the right side for the requested direction.
-    equal(preset.mapping(from: "Russian – PC")["й"], "q", "forward mapping side")
-    equal(preset.mapping(from: "ABC")["q"], "й", "reversed mapping side")
-    equal(preset.mapping(from: "ABC")["Q"], nil, "reversed map only inverts single-char targets")
+    // apply(_:from:) returns the right side for the requested direction.
+    equal(preset.apply("й", from: "Russian – PC"), "q", "forward mapping side")
+    equal(preset.apply("q", from: "ABC"), "й", "reversed mapping side")
+    // The reverse direction inverts with longest-match, so multi-char targets
+    // survive instead of being dropped.
+    equal(multi.apply("QQ", from: "ABC"), "я", "reverse inverts multi-char targets")
+    equal(preset.apply("й п", from: "Russian – PC"), "q g", "forward maps char by char")
+    equal(preset.apply("q g", from: "ABC"), "й п", "reverse maps char by char")
 }
 
 // MARK: - Hotkey
@@ -109,11 +113,34 @@ func testHotkeyCoding() {
     check(Hotkey.none.isSet == false, "unassigned hotkey is not set")
 }
 
+// MARK: - LayoutPair normalization
+
+func testLayoutPairNormalization() {
+    // Equality tolerates dash style (`–`, `—`, `-`) and letter case.
+    check(LayoutPair(from: "Russian – PC", to: "ABC")
+        == LayoutPair(from: "Russian - PC", to: "ABC"), "pair equality normalizes dash style")
+    check(LayoutPair(from: "Russian — PC", to: "ABC")
+        == LayoutPair(from: "russian — pc", to: "abc"), "pair equality ignores letter case")
+    check(LayoutPair(from: " Russian – PC ", to: "ABC")
+        == LayoutPair(from: "Russian - PC", to: "ABC"), "pair equality trims whitespace")
+    check(LayoutPair(from: "ABC", to: "ABC") != LayoutPair(from: "ABC", to: "Hebrew"),
+          "distinct layouts are not equal")
+    // Hashing must agree with equality so dictionaries keyed by pair keep working.
+    let a = Set([LayoutPair(from: "Russian – PC", to: "ABC")])
+    check(a.contains(LayoutPair(from: "russian - pc", to: "abc")), "hash follows normalized equality")
+    // Storage keys are normalized, and migration of old raw keys matches them.
+    let pair = LayoutPair(from: "Russian – PC", to: "ABC")
+    check(LayoutPair.migrateKey("Russian – PC|ABC") == pair.key, "migrated key equals new key")
+    check(Constants.WordSub.pairKey(from: "russian - pc", to: "abc") == pair.key,
+          "pairKey uses the same normalization")
+}
+
 // MARK: - Run
 
 testWordMatcher()
 testPresetTransform()
 testHotkeyCoding()
+testLayoutPairNormalization()
 
 if failures == 0 {
     print("✅ All logic tests passed")

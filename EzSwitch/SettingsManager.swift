@@ -176,16 +176,18 @@ final class SettingsManager: ObservableObject {
 
     /// Order-independent lookup of the selected preset ID for a language pair.
     /// Returns the same preset ID whether `(a, b)` is `(Russian – PC, ABC)` or `(ABC, Russian – PC)`.
+    /// Keys are compared in normalized form (see `LayoutPair.key`), so a pair
+    /// saved before a layout rename still resolves.
     func selectedPresetId(for a: String, _ b: String) -> String? {
-        let direct = Constants.WordSub.pairKey(from: a, to: b)
-        let inverse = Constants.WordSub.pairKey(from: b, to: a)
+        let direct = LayoutPair(from: a, to: b).key
+        let inverse = LayoutPair(from: b, to: a).key
         return selectedPresetIds[direct] ?? selectedPresetIds[inverse]
     }
 
     /// Order-independent setter for the selected preset ID of a language pair.
     func setSelectedPresetId(_ id: String?, for a: String, _ b: String) {
-        let direct = Constants.WordSub.pairKey(from: a, to: b)
-        let inverse = Constants.WordSub.pairKey(from: b, to: a)
+        let direct = LayoutPair(from: a, to: b).key
+        let inverse = LayoutPair(from: b, to: a).key
         if let id = id {
             selectedPresetIds[direct] = id
             selectedPresetIds[inverse] = id
@@ -208,7 +210,10 @@ final class SettingsManager: ObservableObject {
         self.commandSwitchEnabled = defaults.bool(forKey: Constants.DefaultsKey.commandSwitchEnabled, defaultValue: Constants.Default.commandSwitchEnabled)
         self.enableWordSubstitution = defaults.bool(forKey: Constants.DefaultsKey.enableWordSubstitution, defaultValue: Constants.Default.enableWordSubstitution)
         self.launchAtLogin = defaults.bool(forKey: Constants.DefaultsKey.launchAtLogin, defaultValue: Constants.Default.launchAtLogin)
-        self.selectedPresetIds = (defaults.dictionary(forKey: Constants.DefaultsKey.selectedPresetIds) as? [String: String]) ?? [:]
+        // Migrate stored pair keys to normalized form (old files used raw
+        // layout names, which could differ in dash style / case).
+        let rawIds = (defaults.dictionary(forKey: Constants.DefaultsKey.selectedPresetIds) as? [String: String]) ?? [:]
+        self.selectedPresetIds = WordMapperStore.migratePairKeys(rawIds) { _, new in new }
 
         // Hotkey: load from Data (encoded as JSON array)
         if let data = defaults.data(forKey: Constants.DefaultsKey.wordRememberHotkey),

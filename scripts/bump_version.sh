@@ -11,16 +11,18 @@
 
 set -euo pipefail
 
-INFO_PLIST="EzSwitch/Info.plist"
+# Single source of truth for the marketing version: project.pbxproj.
+# Info.plist only references it via $(MARKETING_VERSION), so it is not edited here.
 PBXPROJ="EzSwitch.xcodeproj/project.pbxproj"
 
-CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || echo "unknown")
+CURRENT_VERSION=$(grep -m1 'MARKETING_VERSION' "$PBXPROJ" | sed 's/.*MARKETING_VERSION = //;s/;//')
+CURRENT_VERSION="${CURRENT_VERSION:-unknown}"
 BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo "1")
 GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
 if [ $# -eq 0 ]; then
     echo "EzSwitch version info:"
-    echo "  Marketing Version (CFBundleShortVersionString): $CURRENT_VERSION"
+    echo "  Marketing Version (project.pbxproj):             $CURRENT_VERSION"
     echo "  Build Number (git commit count):                $BUILD_NUMBER"
     echo "  Git Commit Hash:                                $GIT_HASH"
     echo ""
@@ -39,15 +41,11 @@ fi
 
 echo "Bumping EzSwitch version: $CURRENT_VERSION → $NEW_VERSION"
 
-# 1. Update Info.plist
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEW_VERSION" "$INFO_PLIST"
-echo "  ✅ Updated $INFO_PLIST"
-
-# 2. Update project.pbxproj
+# 1. Update project.pbxproj (single source of truth for the version)
 sed -i '' -E "s/MARKETING_VERSION = [^;]+;/MARKETING_VERSION = $NEW_VERSION;/g" "$PBXPROJ"
 echo "  ✅ Updated $PBXPROJ"
 
-# 3. Update README.md if present
+# 2. Update README.md if present
 if [ -f "README.md" ]; then
     sed -i '' -E "s/v$CURRENT_VERSION/v$NEW_VERSION/g" README.md 2>/dev/null || true
     echo "  ✅ Updated README.md"

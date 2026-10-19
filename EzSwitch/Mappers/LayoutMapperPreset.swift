@@ -10,19 +10,47 @@ struct LayoutPair: Hashable, Codable {
         self.to = to
     }
 
-    /// Compare layout names tolerantly: localized names differ in dash style
-    /// (`–` vs `—` vs `-`), letter case and surrounding whitespace.
+    /// Canonical form of a single layout name: localized names differ in dash
+    /// style (`–` vs `—` vs `-`), letter case and surrounding whitespace.
+    /// This is the one place that defines "same layout" — equality, hashing
+    /// and storage keys all go through it so a pair saved as "Russian – PC|ABC"
+    /// is found again no matter which variant the system reports later.
+    static func normalized(_ name: String) -> String {
+        name
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+    }
+
+    /// Compare layout names tolerantly (dash style, case, whitespace).
     /// Never compares against language keywords — any pair of layouts works.
     static func namesMatch(_ a: String, _ b: String) -> Bool {
-        if a == b { return true }
-        func normalize(_ name: String) -> String {
-            name
-                .replacingOccurrences(of: "—", with: "-")
-                .replacingOccurrences(of: "–", with: "-")
-                .trimmingCharacters(in: .whitespaces)
-                .lowercased()
-        }
-        return normalize(a) == normalize(b)
+        a == b || normalized(a) == normalized(b)
+    }
+
+    static func == (lhs: LayoutPair, rhs: LayoutPair) -> Bool {
+        namesMatch(lhs.from, rhs.from) && namesMatch(lhs.to, rhs.to)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(Self.normalized(from))
+        hasher.combine(Self.normalized(to))
+    }
+}
+
+extension LayoutPair {
+    /// Stable storage key for dictionary persistence (`"from|to"`, normalized).
+    /// Old un-normalized keys are migrated on load — see `migrateKey`.
+    var key: String {
+        Constants.WordSub.pairKey(from: Self.normalized(from), to: Self.normalized(to))
+    }
+
+    /// Rebuild a storage key from its `"from|to"` form, normalizing both halves.
+    static func migrateKey(_ key: String) -> String {
+        let parts = key.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return normalized(key) }
+        return Constants.WordSub.pairKey(from: normalized(String(parts[0])), to: normalized(String(parts[1])))
     }
 }
 
@@ -89,17 +117,13 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     /// Last modification timestamp
     var updatedAt: Date
 
-    /// Optional description
-    var description: String?
-
     init(
         id: String = UUID().uuidString,
         name: String,
         fromLayout: String,
         toLayout: String,
         mapping: [String: String] = [:],
-        extraMappings: [ExtraMapping] = [],
-        description: String? = nil
+        extraMappings: [ExtraMapping] = []
     ) {
         self.id = id
         self.name = name
@@ -107,7 +131,6 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
         self.toLayout = toLayout
         self.mapping = mapping
         self.extraMappings = extraMappings
-        self.description = description
         let now = Date()
         self.createdAt = now
         self.updatedAt = now

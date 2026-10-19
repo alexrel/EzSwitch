@@ -3,6 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Top-level code is only allowed in a file named main.swift, so copy the
+# harness there before compiling.
+TESTS_DIR="/tmp/ezswitch-tests"
+mkdir -p "$TESTS_DIR"
+cp scripts/LogicTests.swift "$TESTS_DIR/main.swift"
+
 swiftc -O \
     EzSwitch/Constants.swift \
     EzSwitch/Mappers/KeyboardLayoutUtility.swift \
@@ -10,7 +16,7 @@ swiftc -O \
     EzSwitch/Mappers/LayoutMapperPreset+Transform.swift \
     EzSwitch/Mappers/Hotkey.swift \
     EzSwitch/WordMatcher.swift \
-    scripts/LogicTests.swift \
-    -o /tmp/ezswitch-tests/logic-tests
+    "$TESTS_DIR/main.swift" \
+    -o "$TESTS_DIR/logic-tests"
 
-exec /tmp/ezswitch-tests/logic-tests
+exec "$TESTS_DIR/logic-tests"

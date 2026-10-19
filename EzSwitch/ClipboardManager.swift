@@ -99,11 +99,6 @@ final class ClipboardManager {
         return (marker, pb.changeCount)
     }
 
-    /// Current changeCount
-    var changeCount: Int {
-        return NSPasteboard.general.changeCount
-    }
-
     /// Wait for clipboard to change after copy
     func waitForChange(
         marker: String,

@@ -15,15 +15,11 @@ final class WordMapperStore: ObservableObject {
     /// dictionary scoped to that direction.
     @Published private(set) var mappings: [String: [String: String]] = [:]
 
-    /// Optional per-word modifier metadata (`source → Modifier`).
-    @Published private(set) var modifiers: [String: [String: KeyboardLayoutUtility.Modifier]] = [:]
-
     /// Optional per-word flag indicating whether to switch keyboard layout to target language.
     @Published private(set) var switchLayouts: [String: [String: Bool]] = [:]
 
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "com.ezswitch.wordmapperstore", qos: .userInitiated)
-    private let modifiersDefaultsKey = Constants.DefaultsKey.wordMappingsModifiers
     private let switchLayoutsDefaultsKey = Constants.DefaultsKey.wordMappingsSwitchLayouts
 
     private init() {
@@ -45,20 +41,6 @@ final class WordMapperStore: ObservableObject {
         return merged
     }
 
-    /// Return the modifier for a given word in a language pair.
-    /// Defaults to `.shift` if the source or target contains uppercase characters.
-    func modifier(for source: String, target: String? = nil, pair: LayoutPair) -> KeyboardLayoutUtility.Modifier {
-        let inverseKey = LayoutPair(from: pair.to, to: pair.from).key
-        if let mod = modifiers[pair.key]?[source] ?? modifiers[inverseKey]?[source] {
-            return mod
-        }
-        let resolvedTarget = target ?? entries(for: pair)[source] ?? ""
-        if source.contains(where: { $0.isUppercase }) || resolvedTarget.contains(where: { $0.isUppercase }) {
-            return .shift
-        }
-        return .none
-    }
-
     /// Return whether this substitution should also switch keyboard layout to the target language.
     func shouldSwitchLayout(for source: String, pair: LayoutPair) -> Bool {
         let inverseKey = LayoutPair(from: pair.to, to: pair.from).key
@@ -77,7 +59,6 @@ final class WordMapperStore: ObservableObject {
     func set(
         source: String,
         target: String,
-        modifier: KeyboardLayoutUtility.Modifier? = nil,
         switchLayout: Bool = false,
         for pair: LayoutPair
     ) {
@@ -93,13 +74,6 @@ final class WordMapperStore: ObservableObject {
         var current = mappings[pair.key] ?? [:]
         current[source] = target
         mappings[pair.key] = current
-
-        if let modifier = modifier {
-            modifiers[inverseKey]?.removeValue(forKey: source)
-            var currentMods = modifiers[pair.key] ?? [:]
-            currentMods[source] = modifier
-            modifiers[pair.key] = currentMods
-        }
 
         switchLayouts[inverseKey]?.removeValue(forKey: source)
         var currentSwitches = switchLayouts[pair.key] ?? [:]
@@ -132,8 +106,6 @@ final class WordMapperStore: ObservableObject {
             changed = true
         }
 
-        modifiers[pair.key]?.removeValue(forKey: source)
-        modifiers[inverseKey]?.removeValue(forKey: source)
         switchLayouts[pair.key]?.removeValue(forKey: source)
         switchLayouts[inverseKey]?.removeValue(forKey: source)
 
@@ -147,8 +119,6 @@ final class WordMapperStore: ObservableObject {
         let inverseKey = LayoutPair(from: pair.to, to: pair.from).key
         let removedDirect = mappings.removeValue(forKey: pair.key) != nil
         let removedInverse = mappings.removeValue(forKey: inverseKey) != nil
-        modifiers.removeValue(forKey: pair.key)
-        modifiers.removeValue(forKey: inverseKey)
         switchLayouts.removeValue(forKey: pair.key)
         switchLayouts.removeValue(forKey: inverseKey)
         if removedDirect || removedInverse {
@@ -178,7 +148,10 @@ final class WordMapperStore: ObservableObject {
                 targetLayout: shouldSwitch ? inversePair.to : nil
             )
         }
-        for (key, dict) in mappings where key != pair.key && key != inversePair.key {
+        // Iterate keys sorted: the JSON object has no order, so without this
+        // an ambiguous fallback match could flip between launches.
+        for key in mappings.keys.sorted() where key != pair.key && key != inversePair.key {
+            guard let dict = mappings[key] else { continue }
             if let fallback = WordMatcher.findMatch(word: word, in: dict) {
                 let parts = key.split(separator: "|")
                 let fallbackTarget = (parts.count == 2) ? String(parts[1]) : nil
@@ -208,13 +181,9 @@ final class WordMapperStore: ObservableObject {
     }
 
     private func loadFromDisk() {
-        if let modData = UserDefaults.standard.data(forKey: modifiersDefaultsKey),
-           let decodedMods = try? JSONDecoder().decode([String: [String: KeyboardLayoutUtility.Modifier]].self, from: modData) {
-            modifiers = decodedMods
-        }
         if let switchData = UserDefaults.standard.data(forKey: switchLayoutsDefaultsKey),
            let decodedSwitches = try? JSONDecoder().decode([String: [String: Bool]].self, from: switchData) {
-            switchLayouts = decodedSwitches
+            switchLayouts = Self.migratePairKeys(decodedSwitches) { _, new in new }
         }
 
         guard fileManager.fileExists(atPath: fileURL.path) else {
@@ -224,7 +193,9 @@ final class WordMapperStore: ObservableObject {
         do {
             let data = try Data(contentsOf: fileURL)
             let decoder = JSONDecoder()
-            mappings = try decoder.decode([String: [String: String]].self, from: data)
+            let rawMappings = try decoder.decode([String: [String: String]].self, from: data)
+            // Merge sources written under different spellings of the same pair.
+            mappings = Self.migratePairKeys(rawMappings) { old, new in old.merging(new) { _, n in n } }
             let total = mappings.values.reduce(0) { $0 + $1.count }
             print("🗂 [WordMapperStore] Loaded \(total) word mapping(s) from disk")
         } catch {
@@ -234,11 +205,7 @@ final class WordMapperStore: ObservableObject {
 
     private func persist() {
         let snapshot = mappings
-        let modsSnapshot = modifiers
         let switchesSnapshot = switchLayouts
-        if let modData = try? JSONEncoder().encode(modsSnapshot) {
-            UserDefaults.standard.set(modData, forKey: modifiersDefaultsKey)
-        }
         if let switchData = try? JSONEncoder().encode(switchesSnapshot) {
             UserDefaults.standard.set(switchData, forKey: switchLayoutsDefaultsKey)
         }
@@ -258,7 +225,20 @@ final class WordMapperStore: ObservableObject {
     }
 }
 
-private extension LayoutPair {
-    /// Stable string key for dictionary storage.
-    var key: String { Constants.WordSub.pairKey(from: from, to: to) }
+extension WordMapperStore {
+    /// Normalize the top-level `"from|to"` keys of a persisted dictionary so
+    /// entries saved under the old raw-name scheme keep matching. Collisions
+    /// (e.g. `"Russian – PC|ABC"` vs `"Russian - PC|ABC"`) are merged.
+    static func migratePairKeys<T>(_ dict: [String: T], merge: (T, T) -> T) -> [String: T] {
+        var migrated: [String: T] = [:]
+        for (key, value) in dict {
+            let newKey = LayoutPair.migrateKey(key)
+            if let existing = migrated[newKey] {
+                migrated[newKey] = merge(existing, value)
+            } else {
+                migrated[newKey] = value
+            }
+        }
+        return migrated
+    }
 }

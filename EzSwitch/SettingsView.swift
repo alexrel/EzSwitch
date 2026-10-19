@@ -371,21 +371,19 @@ struct SettingsView: View {
 
                         Spacer()
 
-                        if let githubURL = URL(string: "https://github.com/alexrel/EzSwitch") {
-                            Button {
-                                NSWorkspace.shared.open(githubURL)
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Text("GitHub")
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.system(size: 8, weight: .semibold))
-                                }
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.blue.opacity(0.85))
+                        Button {
+                            NSWorkspace.shared.open(Constants.Link.repository)
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text("GitHub")
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 8, weight: .semibold))
                             }
-                            .buttonStyle(.plain)
-                            .focusable(false)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.blue.opacity(0.85))
                         }
+                        .buttonStyle(.plain)
+                        .focusable(false)
                     }
                     .padding(.horizontal, 4)
                     .padding(.top, 2)
@@ -461,27 +459,25 @@ struct SettingsView: View {
                         .font(.system(size: 11, weight: .semibold))
                 }
 
-                if let githubURL = URL(string: "https://github.com/alexrel/EzSwitch") {
-                    Button {
-                        NSWorkspace.shared.open(githubURL)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "link")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text("github.com/alexrel/EzSwitch")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(Color.blue.opacity(0.1))
-                        )
+                Button {
+                    NSWorkspace.shared.open(Constants.Link.repository)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "link")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(Constants.Link.repositoryDisplay)
+                            .font(.system(size: 11, weight: .medium))
                     }
-                    .buttonStyle(.plain)
-                    .focusable(false)
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color.blue.opacity(0.1))
+                    )
                 }
+                .buttonStyle(.plain)
+                .focusable(false)
             }
 
             Text("© 2026 AlexReL · MIT License")
@@ -663,7 +659,7 @@ struct SettingsView: View {
     private var availablePresetsForCurrentPair: [LayoutMapperPreset] {
         let left = settings.leftCommandLanguage
         let right = settings.rightCommandLanguage
-        guard left != "None", right != "None" else { return [] }
+        guard left != Constants.Default.noneLanguage, right != Constants.Default.noneLanguage else { return [] }
         let pair = LayoutPair(from: left, to: right)
         return MapperStore.shared.presets(for: pair)
     }
@@ -671,7 +667,7 @@ struct SettingsView: View {
     private var currentMapperInfo: String {
         let left = settings.leftCommandLanguage
         let right = settings.rightCommandLanguage
-        if left == "None" || right == "None" {
+        if left == Constants.Default.noneLanguage || right == Constants.Default.noneLanguage {
             return String(localized: "Pick a pair of languages")
         }
         let pair = LayoutPair(from: left, to: right)

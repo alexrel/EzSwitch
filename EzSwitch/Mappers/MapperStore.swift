@@ -13,6 +13,8 @@ final class MapperStore: ObservableObject {
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "com.ezswitch.mapperstore", qos: .userInitiated)
     private var didAttemptSeed = false
+    /// Pending debounced disk write, cancelled and rescheduled on each change.
+    private var persistWork: DispatchWorkItem?
 
     private init() {
         loadFromDisk()
@@ -124,7 +126,9 @@ final class MapperStore: ObservableObject {
             var deduplicated: [LayoutMapperPreset] = []
             for p in loaded {
                 if p.name.hasSuffix("(auto)") {
-                    let key = "\(p.fromLayout)|\(p.toLayout)|\(p.name)"
+                    // Normalize like `LayoutPair.key` so duplicates written with
+                    // different dash styles/cases are recognized as identical.
+                    let key = "\(LayoutPair.normalized(p.fromLayout))|\(LayoutPair.normalized(p.toLayout))|\(p.name)"
                     if seenAutoNames.contains(key) { continue }
                     seenAutoNames.insert(key)
                 }
@@ -140,22 +144,50 @@ final class MapperStore: ObservableObject {
         }
     }
 
-    /// Save presets to JSON file
+    /// Save presets to JSON file.
+    ///
+    /// The editor calls `save(_:)` on every keystroke, so writing straight
+    /// away would encode and rewrite the whole file per character typed.
+    /// Instead the write is coalesced: rapid changes collapse into a single
+    /// disk write a moment after typing pauses.
     private func persist() {
+        persistWork?.cancel()
         let snapshot = presets
-        queue.async { [weak self, snapshot] in
-            guard let self = self else { return }
-            do {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                encoder.dateEncodingStrategy = .iso8601
-                let data = try encoder.encode(snapshot)
-                try data.write(to: self.presetsFileURL, options: .atomic)
-                print("🗂 [MapperStore] Saved \(snapshot.count) preset(s) to disk")
-            } catch {
-                print("⚠️ [MapperStore] Failed to save presets: \(error.localizedDescription)")
-            }
+        let work = DispatchWorkItem { [weak self] in
+            self?.writePresets(snapshot)
         }
+        persistWork = work
+        queue.asyncAfter(deadline: .now() + Constants.Timing.persistDebounceSec, execute: work)
+    }
+
+    /// Encode `snapshot` and write it to disk. Runs on `queue`.
+    private func writePresets(_ snapshot: [LayoutMapperPreset]) {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(snapshot)
+            try data.write(to: presetsFileURL, options: .atomic)
+            print("🗂 [MapperStore] Saved \(snapshot.count) preset(s) to disk")
+        } catch {
+            print("⚠️ [MapperStore] Failed to save presets: \(error.localizedDescription)")
+        }
+    }
+
+    /// Flush any pending debounced write immediately, synchronously.
+    /// Call before the values are read by another process, or on termination,
+    /// so a debounced write is not lost with the process.
+    func flush() {
+        guard let work = persistWork, !work.isCancelled else {
+            persistWork = nil
+            return
+        }
+        work.cancel()
+        persistWork = nil
+        // Read the live list here (main-confined) and write synchronously so
+        // the data is on disk by the time this returns.
+        let snapshot = presets
+        queue.sync { writePresets(snapshot) }
     }
 
     // MARK: - Seed
@@ -187,8 +219,7 @@ final class MapperStore: ObservableObject {
             name: "\(from) ↔ \(to) (auto)",
             fromLayout: from,
             toLayout: to,
-            mapping: mapping,
-            description: "Auto-generated on first launch via UCKeyTranslate"
+            mapping: mapping
         )
         presets.append(preset)
         settings.setSelectedPresetId(preset.id, for: from, to)

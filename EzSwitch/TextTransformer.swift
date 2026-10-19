@@ -15,12 +15,37 @@ final class TextTransformer {
 
     // MARK: - Public API
 
+    /// Serial queue for the Cmd+C round-trip and paste sequence. These block
+    /// for tens-to-hundreds of milliseconds (`usleep` between keystrokes,
+    /// polling for the clipboard) and must never run on the main thread:
+    /// the event tap lives on the main run loop, so blocking main delays
+    /// delivery of every real keystroke the user types meanwhile.
+    private let workQueue = DispatchQueue(label: "ezswitch.transform.work", qos: .userInteractive)
+
     /// Main entry point: tries Branch A (selection), falls back to Branch B (last word)
+    ///
+    /// Called on the event-tap thread (main). Layout tracking
+    /// (`KeyboardManager.currentLayoutID` / `previousLayoutID`) is main-confined
+    /// state, so it is snapshotted here and passed down — the Cmd+C round-trip
+    /// that follows does not change the layout anyway.
     /// - Parameter skipLayoutSwitch: if true, do not switch layout after transformation
     func transformSelectedText(skipLayoutSwitch: Bool = false) {
         print("\n🔄 [TextTransformer] ═══════════════════════════════════")
         print("🔄 [TextTransformer] Transform requested (skipLayout: \(skipLayoutSwitch))")
 
+        let km = KeyboardManager.shared
+        let currentLayout = km.currentLayoutName() ?? km.currentLayoutID
+        let previousLayout = km.previousLayoutID
+
+        workQueue.async { [weak self] in
+            self?.runTransform(currentLayout: currentLayout,
+                               previousLayout: previousLayout,
+                               skipLayoutSwitch: skipLayoutSwitch)
+        }
+    }
+
+    /// Runs the actual transform flow on `workQueue`.
+    private func runTransform(currentLayout: String, previousLayout: String, skipLayoutSwitch: Bool) {
         // Save full clipboard state (including images, files, etc.)
         let clipboard = ClipboardManager.shared
         let savedState = clipboard.saveState()
@@ -28,30 +53,42 @@ final class TextTransformer {
         // Branch A: Try to detect and transform selected text
         if let selectedText = tryGetSelectedText() {
             print("✅ [TextTransformer] Branch A: selection detected")
-            completeBranchA(selectedText: selectedText, savedState: savedState, skipLayoutSwitch: skipLayoutSwitch)
+            completeBranchA(selectedText: selectedText, savedState: savedState,
+                            currentLayout: currentLayout, previousLayout: previousLayout,
+                            skipLayoutSwitch: skipLayoutSwitch)
             return
         }
 
         // Branch B: Transform last word before cursor (no selection)
         print("🔀 [TextTransformer] Branch A: no selection, trying Branch B (last word)")
-        tryBranchB_LastWord(savedState: savedState, skipLayoutSwitch: skipLayoutSwitch)
+        tryBranchB_LastWord(savedState: savedState,
+                            currentLayout: currentLayout, previousLayout: previousLayout,
+                            skipLayoutSwitch: skipLayoutSwitch)
     }
 
     // MARK: - Branch A: Selected Text Transformation
+
+    /// Copies the current selection through the pasteboard: writes a marker,
+    /// sends Cmd+C, then polls until the clipboard holds something other than
+    /// the marker. Callers rely on the selection still being active afterwards.
+    ///
+    /// Branch A and Branch B use the same mechanism with different timeouts,
+    /// so this is the single place that implements the round-trip.
+    private func copySelection(timeoutMs: Int) -> String? {
+        let clipboard = ClipboardManager.shared
+        let (marker, markerCount) = clipboard.setMarker()
+
+        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.c)) // Cmd+C
+        usleep(keySequenceDelayUs)
+
+        return clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: timeoutMs)
+    }
 
     /// Attempts to copy selected text using Cmd+C
     private func tryGetSelectedText() -> String? {
         print("📋 [Branch A] Attempting to copy selection")
 
-        let clipboard = ClipboardManager.shared
-        let (marker, markerCount) = clipboard.setMarker()
-
-        // Send Cmd+C with proper timing
-        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.c)) // C
-        usleep(keySequenceDelayUs)
-
-        // Wait for clipboard to change
-        guard let copied = clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: copyTimeoutMs) else {
+        guard let copied = copySelection(timeoutMs: copyTimeoutMs) else {
             print("📋 [Branch A] Copy failed or no selection")
             return nil
         }
@@ -60,9 +97,11 @@ final class TextTransformer {
         return copied
     }
 
-    private func completeBranchA(selectedText: String, savedState: ClipboardManager.ClipboardState, skipLayoutSwitch: Bool = false) {
+    private func completeBranchA(selectedText: String, savedState: ClipboardManager.ClipboardState,
+                                 currentLayout: String, previousLayout: String,
+                                 skipLayoutSwitch: Bool = false) {
         // Plan multi-language transformation & cycling
-        let plan = planTransform(for: selectedText)
+        let plan = planTransform(for: selectedText, currentLayout: currentLayout, previousLayout: previousLayout)
         let transformed = plan.transformedText
         print("🔄 [Branch A] Transform: \"\(selectedText.prefix(30))\" → \"\(transformed.prefix(30))\"")
 
@@ -80,7 +119,8 @@ final class TextTransformer {
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
                 print("⌨️  [Branch A] Switching layout to: \(target)")
-                KeyboardManager.shared.switchToLayout(named: target)
+                // `currentLayoutID`/`previousLayoutID` are main-confined.
+                DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(named: target) }
             }
         } else if skipLayoutSwitch {
             print("⌨️  [Branch A] Layout switch skipped (modifier held)")
@@ -103,7 +143,9 @@ final class TextTransformer {
     /// - "hello еуые |" → "hello test "
     /// - "еуые |" → "test "
     /// - "еуые|" → "test"
-    private func tryBranchB_LastWord(savedState: ClipboardManager.ClipboardState, skipLayoutSwitch: Bool = false) {
+    private func tryBranchB_LastWord(savedState: ClipboardManager.ClipboardState,
+                                     currentLayout: String, previousLayout: String,
+                                     skipLayoutSwitch: Bool = false) {
         print("🎯 [Branch B] Starting last-word transform")
 
         // Try to select word using smart method (tries both macOS and IDE shortcuts)
@@ -138,7 +180,7 @@ final class TextTransformer {
         }
 
         // Transform and paste (supporting multi-language cycle)
-        let plan = planTransform(for: parsed.word)
+        let plan = planTransform(for: parsed.word, currentLayout: currentLayout, previousLayout: previousLayout)
         let transformedWord = plan.transformedText
         let replacement = transformedWord + parsed.trailingSpaces
         print("🔄 [Branch B] Transform: \"\(parsed.word)\" → \"\(transformedWord)\"")
@@ -156,7 +198,7 @@ final class TextTransformer {
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
                 print("⌨️  [Branch B] Switching layout to: \(target)")
-                KeyboardManager.shared.switchToLayout(named: target)
+                DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(named: target) }
             }
         } else if skipLayoutSwitch {
             print("⌨️  [Branch B] Layout switch skipped (modifier held)")
@@ -278,13 +320,7 @@ final class TextTransformer {
 
     /// Copies current selection and returns it
     private func copyCurrentSelection() -> String? {
-        let clipboard = ClipboardManager.shared
-        let (marker, markerCount) = clipboard.setMarker()
-
-        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.c)) // Cmd+C
-        usleep(keySequenceDelayUs)
-
-        return clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: Int(Constants.Timing.captureSelectionTimeoutSec * 1000))
+        copySelection(timeoutMs: Int(Constants.Timing.captureSelectionTimeoutSec * 1000))
     }
 
     /// Checks if selection looks like a valid word (not whole line, no newlines)
@@ -444,12 +480,9 @@ final class TextTransformer {
         // 1. Try direct presets
         let directPresets = store.presets(for: LayoutPair(from: fromLayout, to: toLayout))
         if let preset = directPresets.first {
-            // `applyReverse` needs the *forward* map: it inverts it itself,
-            // including multi-character targets via longest-match.
-            let mapping = preset.characterMapping()
-            let result = layoutsMatch(preset.pair.from, fromLayout)
-                ? applyForward(text, mapper: mapping)
-                : applyReverse(text, forward: mapping)
+            // `apply(_:from:)` picks the direction itself and inverts with
+            // longest-match, so multi-character targets survive the reverse hop.
+            let result = preset.apply(text, from: fromLayout)
             if result != text { return result }
         }
 
@@ -476,12 +509,14 @@ final class TextTransformer {
 
     /// Plans and returns the text transformation and target layout for a given input word/selection,
     /// supporting multi-language cycling and prioritizing previousLayout.
-    private func planTransform(for rawText: String) -> TransformPlan {
+    /// - Parameters: `currentLayout`/`previousLayout` are snapshots taken on
+    ///   the main thread by the caller (this runs on `workQueue`).
+    private func planTransform(for rawText: String, currentLayout: String, previousLayout: String) -> TransformPlan {
         let now = Date()
 
         // 1. Check for consecutive Double Shift (Cycle advancement)
         if let cycle = activeCycle,
-           now.timeIntervalSince(cycle.timestamp) < 2.5,
+           now.timeIntervalSince(cycle.timestamp) < Constants.Timing.cycleExpirySec,
            (rawText == cycle.steps[cycle.currentStepIndex].text || rawText == cycle.originalText) {
 
             let nextIndex = cycle.currentStepIndex + 1
@@ -500,9 +535,8 @@ final class TextTransformer {
         }
 
         // 2. Fresh transformation
-        let km = KeyboardManager.shared
-        let currentLayout = km.currentLayoutName() ?? km.currentLayoutID
-        let previousLayout = km.previousLayoutID
+        // Layout snapshots arrive from the caller (main thread) — do not
+        // touch KeyboardManager's main-confined state from this queue.
         let settings = SettingsManager.shared
         let primaryLanguages = [settings.leftCommandLanguage, settings.rightCommandLanguage]
             .filter { $0 != Constants.Default.noneLanguage && !$0.isEmpty }
@@ -574,66 +608,6 @@ final class TextTransformer {
         return TransformPlan(transformedText: firstStep.text, targetLayout: firstStep.targetLayout)
     }
 
-    // MARK: - Direction Detection
-
-    /// Apply a forward `[Character: String]` mapping character by character.
-    private func applyForward(_ text: String, mapper: [Character: String]) -> String {
-        var result = ""
-        result.reserveCapacity(text.count)
-        for char in text {
-            if let mapped = mapper[char] {
-                result.append(mapped)
-            } else {
-                result.append(char)
-            }
-        }
-        return result
-    }
-
-    /// Apply the inverse of a forward `[Character: String]` mapping.
-    private func applyReverse(_ text: String, forward: [Character: String]) -> String {
-        var multiPatterns: [(String, String)] = []
-        var charMap: [Character: String] = [:]
-
-        for (k, v) in forward {
-            if v.count == 1 {
-                charMap[v.first!] = String(k)
-            } else {
-                multiPatterns.append((v, String(k)))
-            }
-        }
-        let multiStarts: Set<Character> = Set(multiPatterns.map { $0.0.first! })
-        for c in multiStarts {
-            charMap.removeValue(forKey: c)
-        }
-        multiPatterns.sort { $0.0.count > $1.0.count }
-
-        var result = ""
-        var i = text.startIndex
-        let end = text.endIndex
-        while i < end {
-            var matched = false
-            for (pattern, replacement) in multiPatterns {
-                let endIdx = text.index(i, offsetBy: pattern.count, limitedBy: end) ?? end
-                if text[i..<endIdx] == pattern {
-                    result.append(replacement)
-                    i = endIdx
-                    matched = true
-                    break
-                }
-            }
-            if matched { continue }
-            let char = text[i]
-            if let mapped = charMap[char] {
-                result.append(mapped)
-            } else {
-                result.append(char)
-            }
-            i = text.index(after: i)
-        }
-        return result
-    }
-
     // MARK: - Keyboard Helpers
 
     /// Sends a single key press (down + up) with proper timing
@@ -645,7 +619,4 @@ final class TextTransformer {
     private func simulateCmdKey(keyCode: CGKeyCode) {
         CGEventSynthesizer.pressCommand(Int(keyCode), delayUs: keyDownUpDelayUs)
     }
-
-    // MARK: - Layout Detection & Switching
-
 }

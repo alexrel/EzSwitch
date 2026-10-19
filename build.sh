@@ -27,10 +27,14 @@ set -eo pipefail
 APP_NAME="EzSwitch"
 SCHEME="EzSwitch"
 
-# Single source of truth for Marketing Version: project Info.plist (unless overridden via VERSION=...)
+# Single source of truth for Marketing Version: project.pbxproj MARKETING_VERSION
+# (the Info.plist only references it via $(MARKETING_VERSION); unless overridden via VERSION=...)
 if [ -z "${VERSION:-}" ]; then
-    VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" EzSwitch/Info.plist 2>/dev/null || echo "1.1.0")
+    VERSION=$(grep -m1 'MARKETING_VERSION' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*MARKETING_VERSION = //;s/;//' || echo "")
+    VERSION="${VERSION:-1.1.0}"
 fi
+BUNDLE_ID=$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*PRODUCT_BUNDLE_IDENTIFIER = //;s/;//')
+BUNDLE_ID="${BUNDLE_ID:-alexrel.EzSwitch}"
 
 # Automatically compute build number & git commit hash from git
 BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo "1")
@@ -154,6 +158,16 @@ build_app() {
         else
             mkdir -p "$EXPORT_DIR/$APP_NAME.app/Contents/MacOS" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources"
             cp "EzSwitch/Info.plist" "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
+            # swiftc path doesn't run xcodebuild's Info.plist preprocessing,
+            # so resolve the $(VAR) placeholders manually.
+            /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $APP_NAME" \
+                "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" \
+                "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" \
+                "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion 14.0" \
+                "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
         fi
         cp -R "EzSwitch/en.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
         cp -R "EzSwitch/ru.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
