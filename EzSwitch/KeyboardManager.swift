@@ -41,16 +41,16 @@ final class KeyboardManager {
 
     // Word-level substitution buffer
     private var wordBuffer: String = ""
-    /// True while we are programmatically sending backspaces + Cmd+V so
-    /// our own synthetic events do not mutate `wordBuffer`.
+    /// While replacement is in progress, pass events through without updating
+    /// wordBuffer or modifier tracking. This also applies to real user input.
     private var isReplacingWord = false
     /// Serial queue for long synthetic-input sequences (backspaces, Cmd+C
     /// round-trip, paste). These block for tens of milliseconds with `usleep`
     /// and must not run on the main thread: the event tap lives on the main
     /// run loop, so blocking main delays delivery of every real keystroke.
     private let workQueue = DispatchQueue(label: "ezswitch.keyboard.work", qos: .userInteractive)
-    /// Last layout we switched TO or the currently active layout, as a stable
-    /// input source id (never a localized name — see `LayoutRegistry`).
+    /// Last observed or requested layout, as a stable input source ID.
+    /// Reads from TIS refresh this cached value after system layout changes.
     public private(set) var currentLayoutID: String = ""
     /// Previous layout before the current switch (used to determine where we came from).
     public private(set) var previousLayoutID: String = ""
@@ -176,7 +176,7 @@ final class KeyboardManager {
         let now = CFAbsoluteTimeGetCurrent()
         let switchMod = SettingsManager.shared.switchModifier
 
-        // Ignore synthetic keystrokes while we are actively replacing a word
+        // Bypass state updates while the replacement sequence is running.
         if isReplacingWord {
             return Unmanaged.passUnretained(event)
         }
@@ -208,7 +208,7 @@ final class KeyboardManager {
                     return Unmanaged.passUnretained(event)
                 }
 
-                // Navigation / Escape / Tab keys: clear word buffer
+                // Navigation and Escape keys clear the word buffer.
                 if isBufferResetKey(keyCode) {
                     wordBuffer.removeAll()
                     return Unmanaged.passUnretained(event)
@@ -237,9 +237,7 @@ final class KeyboardManager {
         }
 
         if type == .flagsChanged {
-            // 2) Modifiers during switch-modifier -> cancel (the other modifier keys
-            //    and Ctrl/Fn). The transform key uses a different code path, so it
-            //    stays out of the conflict.
+            // 2) Other modifiers cancel a pending layout switch.
             let forbidden: CGEventFlags = [.maskShift, .maskAlternate, .maskControl, .maskSecondaryFn]
             // Strip out the modifier we are actually watching — the modifier we own
             // is expected to be present while its key is held.
@@ -387,10 +385,8 @@ final class KeyboardManager {
             state = KeyState(isDown: true, downAt: now, cancelled: false)
         } else if !isDown && state.isDown {
             if !state.cancelled && (now - state.downAt) < commandMaxHold {
-                // Only `switchToLayout(id:)` updates `currentLayoutID` /
-                // `previousLayoutID` — pre-assigning here would make its
-                // "previous != current" check always false and silently stop
-                // `previousLayoutID` from tracking where we came from.
+                // Let switchToLayout update tracking: assigning currentLayoutID
+                // here would lose the previous layout before the switch is recorded.
                 switchToLayout(id: layoutID)
             }
             state.isDown = false
@@ -399,19 +395,15 @@ final class KeyboardManager {
 
     /// Switch to the layout with this stable id and record it as current.
     ///
-    /// Matching is by input source id, never by localized name: the name the
-    /// system reports depends on the current language (`Russian – PC` in
-    /// English, `Русская — ПК` in Russian), so comparing it against a stored
-    /// name used to make switching silently do nothing.
+    /// Prefer input source IDs because display names depend on system language.
+    /// Legacy names can still resolve when they match the current locale.
     func switchToLayout(id: String) {
         guard !id.isEmpty, id != Constants.Default.noneLanguage else { return }
         guard let source = KeyboardLayoutUtility.inputSource(forLayout: id) else { return }
 
         // Prefer the id TIS reports over the requested value: it is the exact
-        // identity of the source we are about to select, and it normalizes
-        // legacy name-based values away. Update tracking only after a
-        // successful select — otherwise `currentLayoutID` would "stick" to an
-        // id that was never actually applied when no source matched.
+        // identity of the source we are about to select, including when the
+        // requested value was a legacy localized name.
         let selectedID = KeyboardLayoutUtility.inputSourceID(of: source) ?? id
         if !currentLayoutID.isEmpty, currentLayoutID != selectedID {
             previousLayoutID = currentLayoutID
@@ -726,9 +718,8 @@ final class KeyboardManager {
             usleep(Constants.Timing.pasteSettleUs)
         }
 
-        // Restore the original clipboard once the paste has had time to
-        // settle, but only if the user hasn't copied something else in
-        // the meantime.
+        // Restore after paste settles, provided the clipboard still contains
+        // our text. This content check cannot detect a new copy of identical text.
         DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Timing.pasteRestoreDelaySec) {
             if NSPasteboard.general.string(forType: .string) == text {
                 ClipboardManager.shared.restoreState(savedState)

@@ -54,8 +54,8 @@ final class MapperWindowController: NSObject, NSWindowDelegate {
         // content to shift. We're a normal window with our own title bar.
         newWindow.collectionBehavior = [.fullScreenNone, .managed]
 
-        // Center window on the screen with the cursor (avoids spawning off-screen
-        // on multi-monitor setups). We override any saved frame from previous runs.
+        // Center in the main screen's visible area to avoid opening off-screen.
+        // Override any saved frame from previous runs.
         if let screen = NSScreen.main {
             let visible = screen.visibleFrame
             let x = visible.midX - windowSize.width / 2

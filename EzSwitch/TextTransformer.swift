@@ -400,7 +400,7 @@ final class TextTransformer {
     private var activeCycle: TransformCycle?
 
     /// Characters a layout can produce with the base and Shift modifiers,
-    /// cached per layout name. Used to decide which of the configured layouts
+    /// cached per layout value. Used to decide which of the configured layouts
     /// the text was actually typed in — independent of layout naming.
     private var layoutCharacterCache: [String: Set<Character>] = [:]
 

@@ -2,10 +2,9 @@ import Foundation
 
 /// Represents a pair of keyboard layouts (source → target).
 ///
-/// `from`/`to` are stable input source ids (`com.apple.keylayout.*`), not
-/// localized names — see `LayoutRegistry` for why. Equality, hashing and
-/// storage keys all normalize both sides, so a pair saved under one macOS
-/// version is still found under the next.
+/// New `from`/`to` values are input source IDs; older files may contain names.
+/// Equality, hashing, and storage keys share normalization for case, dashes,
+/// and whitespace. Normalization does not convert localized names into IDs.
 struct LayoutPair: Hashable, Codable {
     /// Stable input source id of the source layout.
     let from: String
@@ -74,16 +73,15 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     var name: String
 
     /// Source layout — stable input source id (e.g. `com.apple.keylayout.RussianWin`).
-    /// Never a localized name: see `LayoutRegistry`.
+    /// Legacy presets may still contain a localized name.
     let fromLayout: String
 
     /// Target layout — stable input source id (e.g. `com.apple.keylayout.ABC`).
     let toLayout: String
 
-    /// Character mapping: source character → target character
-    /// Stored as `[String: String]` to support any character including
-    /// multi-byte ones. Keys and values are single-character strings
-    /// (length 1) in normal usage.
+    /// Character mapping stored as strings for JSON persistence.
+    /// Keys normally contain one character; targets may contain multiple
+    /// characters, including emoji or abbreviations.
     var mapping: [String: String]
 
     /// Extra (custom) mappings with modifier support.
@@ -92,8 +90,7 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     var extraMappings: [ExtraMapping]
 
     /// Represents a single custom mapping with an explicit modifier choice.
-    /// Stores modifier as a raw UInt32 to stay Codable (KeyboardLayoutUtility.Modifier
-    /// is not Codable).
+    /// Stores the modifier as a raw UInt32 in JSON.
     struct ExtraMapping: Codable, Identifiable, Hashable {
         let id: String
         /// Source character (single char, e.g. "п")

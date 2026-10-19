@@ -30,9 +30,8 @@ struct MapperSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Top section: pair picker + segmented mode switcher.
-            // Pinned to a fixed height so the From/To block and the
-            // segmented control don't shift when switching between
-            // tabs (each tab's content has a different intrinsic height).
+            // Keep these controls outside the changing editor content so
+            // switching tabs replaces only the area below the header.
             VStack(spacing: 0) {
                 // 1) Pair + mode selector
                 header
@@ -260,8 +259,7 @@ struct MapperSettingsView: View {
         return saved
     }
 
-    /// Source side: every enabled layout and no "—" — a mapping always has a
-    /// layout to start from.
+    /// Source options include the current target even if it is not enabled.
     private var fromLayoutOptions: [LayoutRegistry.Layout] {
         LayoutRegistry.mapperOptions(availableLayouts, including: [toLayout], excluding: "")
     }
@@ -273,11 +271,8 @@ struct MapperSettingsView: View {
         LayoutRegistry.mapperOptions(availableLayouts, including: [fromLayout], excluding: fromLayout)
     }
 
-    /// Keep the pair valid.
-    ///
-    /// The source is always a real, enabled layout; the target is always a
-    /// different one — except when the system offers a single layout, where
-    /// there is nothing to map to and "—" is the honest answer.
+    /// Replace a missing source with an enabled layout, then repair an empty
+    /// or identical target. With no alternative target, use the None sentinel.
     private func normalizePair() {
         let layouts = availableLayouts
         let none = Constants.Default.noneLanguage

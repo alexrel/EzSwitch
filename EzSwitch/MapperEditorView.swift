@@ -699,10 +699,10 @@ struct MapperEditorView: View {
     }
 
     /// Quick suggestions for common mappings.
-    /// The user-chosen modifier (from the picker) decides which two characters
-    /// to suggest: the base and the variant of the OTHER modifier.
+    /// Suggest the selected target variant plus a base/Shift alternative.
+    /// Shift+Option uses Shift as the primary suggestion.
     private func suggestionsForKey(_ key: VisualKey, modifier: KeyboardLayoutUtility.Modifier) -> [String] {
-        // Pair (base, shifted) when modifier is "none"/"option", (shifted, base) when it's "shift"
+        // Offer base when Shift is selected; otherwise offer Shift.
         let wantsShifted = (modifier == .shift || modifier == .shiftOption)
         let otherModifier: KeyboardLayoutUtility.Modifier = wantsShifted ? .none : .shift
 
@@ -1228,7 +1228,6 @@ struct MappingListRow: View {
             }
             .buttonStyle(.plain)
 
-            // Single clean delete icon
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 11, weight: .medium))

@@ -76,9 +76,8 @@ extension LayoutMapperPreset {
 
     /// Apply this preset's mapping to `text`, typed in `fromLayout`.
     ///
-    /// This is the single implementation every caller uses — word
-    /// substitution, text transformation and the editor preview all need
-    /// "map in this direction", they only differ in how they pick the preset.
+    /// Shared direction-aware mapping for word substitution and text transformation.
+    /// The editor preview uses transform(_:) to choose its direction automatically.
     /// The forward direction maps character by character; the reverse inverts
     /// with longest-match so multi-character targets survive.
     func apply(_ text: String, from fromLayout: String) -> String {

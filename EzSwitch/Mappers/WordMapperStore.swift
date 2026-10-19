@@ -6,7 +6,7 @@ import OSLog
 ///
 /// Each entry is a single direction: `source → target` for a specific
 /// `LayoutPair`. To get reverse behavior, add a second entry for the
-/// opposite pair (UI offers a "Save both ways" checkbox for convenience).
+/// opposite pair; reverse entries are not generated automatically.
 ///
 /// File: `~/Library/Application Support/EzSwitch/word_mappings.json`
 final class WordMapperStore: ObservableObject {
@@ -127,10 +127,8 @@ final class WordMapperStore: ObservableObject {
         }
     }
 
-    /// Look up a substitution for a typed word in a given direction.
-    /// Checks the active direction first, then the inverse direction (in case
-    /// a mapping like "lf → да" was saved under the primary pair key), and
-    /// finally falls back across all stored pairs.
+    /// Look up a typed word using both stored orientations of the active pair.
+    /// If neither contains a match, search the remaining pairs in sorted key order.
     func findMatch(word: String, pair: LayoutPair) -> WordMatchResult? {
         if let direct = WordMatcher.findMatch(word: word, in: entries(for: pair)) {
             let shouldSwitch = shouldSwitchLayout(for: direct.original, pair: pair)
@@ -228,8 +226,9 @@ final class WordMapperStore: ObservableObject {
 
 extension WordMapperStore {
     /// Normalize the top-level `"from|to"` keys of a persisted dictionary so
-    /// entries saved under the old raw-name scheme keep matching. Collisions
-    /// (e.g. `"Russian – PC|ABC"` vs `"Russian - PC|ABC"`) are merged.
+    /// spelling differences compare consistently. Collisions (e.g.
+    /// `"Russian – PC|ABC"` vs `"Russian - PC|ABC"`) are merged.
+    /// This does not convert legacy layout names into input source IDs.
     static func migratePairKeys<T>(_ dict: [String: T], merge: (T, T) -> T) -> [String: T] {
         var migrated: [String: T] = [:]
         for (key, value) in dict {

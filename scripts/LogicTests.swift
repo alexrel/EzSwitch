@@ -1,22 +1,12 @@
 import Foundation
 
-// Standalone test harness for the pure logic in EzSwitch.
+// Standalone harness for mapping, matching, hotkey, and picker logic.
+// The app has no XCTest target; run the wrapper to compile these sources
+// together and copy the harness to main.swift for its top-level test calls:
 //
-// The app target has no XCTest bundle (the editor-only project would need a
-// separate test target), so this file is compiled directly against the
-// dependency-free sources:
+//   zsh scripts/run-logic-tests.sh
 //
-//   swiftc EzSwitch/Constants.swift \
-//          EzSwitch/Mappers/KeyboardLayoutUtility.swift \
-//          EzSwitch/Mappers/LayoutMapperPreset.swift \
-//          EzSwitch/Mappers/LayoutMapperPreset+Transform.swift \
-//          EzSwitch/Mappers/Hotkey.swift \
-//          EzSwitch/WordMatcher.swift \
-//          scripts/LogicTests.swift -o /tmp/ezswitch-logic-tests
-//
-// Or simply: ./scripts/run-logic-tests.sh
-//
-// Run it after changing WordMatcher, LayoutMapperPreset or Hotkey.
+// These checks do not cover settings migration or live keyboard/clipboard flows.
 
 var failures = 0
 
@@ -137,11 +127,8 @@ func testLayoutPairNormalization() {
 
 // MARK: - Layout identity (stable ids)
 
-/// Guards the language-switch regression: a layout's *localized* name changes
-/// with the system language (`Russian – PC` in English, `Русская — ПК` in
-/// Russian), so storing or comparing names silently stopped working the moment
-/// the language changed. Storage and comparison go through stable input source
-/// ids instead.
+/// Checks ID pair keys and legacy name normalization. It does not exercise
+/// migration of saved settings after a system language change.
 func testLayoutIdentityUsesStableIDs() {
     let russian = "com.apple.keylayout.RussianWin"
     let abc = "com.apple.keylayout.ABC"
@@ -173,8 +160,7 @@ func testLayoutIdentityUsesStableIDs() {
 
 // MARK: - Mapper pair options
 
-/// The mapper's From/To pickers must never offer an impossible pair: a mapping
-/// always has a source (no "—"), and a target that differs from it.
+/// Checks source/target options, exclusions, and the single-layout fallback.
 func testMapperPairOptions() {
     let ru = LayoutRegistry.Layout(id: "com.apple.keylayout.RussianWin", name: "Русская — ПК")
     let abc = LayoutRegistry.Layout(id: "com.apple.keylayout.ABC", name: "ABC")

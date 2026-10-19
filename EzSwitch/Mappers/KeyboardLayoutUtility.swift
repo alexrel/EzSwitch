@@ -10,9 +10,8 @@ enum KeyboardLayoutUtility {
 
     /// Modifier flags for character lookup.
     /// These are the `UCKeyTranslate` modifier masks (UnicodeUtilities.h) —
-    /// see `Constants.UCTModifier` for the same bit values. NOTE: these
-    /// are NOT the same as Carbon event modifier masks (`Constants.ModifierMask`)
-    /// — the UCKeyTranslate API uses a separate, smaller bitfield.
+    /// see `Constants.UCTModifier` for the same bit values. These are separate
+    /// from the persisted hotkey masks in `Constants.ModifierMask`.
     /// Enum raw values must be literals, so we repeat the bits here.
     enum Modifier: UInt32, Codable {
         case none = 0
@@ -98,7 +97,7 @@ enum KeyboardLayoutUtility {
     /// Look up a character for a given key code in a specific layout with modifiers
     ///
     /// - Parameter layout: stable layout id. Values saved before ids were
-    ///   introduced still hold a localized name and are resolved too.
+    ///   introduced may resolve by their name in the current locale.
     static func character(
         forKeyCode keyCode: UInt16,
         modifier: Modifier,
@@ -167,7 +166,7 @@ enum KeyboardLayoutUtility {
 
     /// Extract complete character table for a layout (all key codes × all modifiers)
     ///
-    /// - Parameter layout: stable layout id (legacy localized names still resolve).
+    /// - Parameter layout: stable ID, or a legacy name resolvable in the current locale.
     static func characterTable(forLayout layout: String) -> [CharacterEntry] {
         guard let source = inputSource(forLayout: layout) else {
             return []

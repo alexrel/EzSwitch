@@ -12,16 +12,13 @@
 # Signing:
 #   If a "EzSwitch Dev" codesigning identity exists in the login Keychain
 #   (installed via ./scripts/setup_dev_signing.sh), it will be used to
-#   produce a stable signature across builds. Otherwise, falls back to
-#   adhoc signing ("-"), which is unique per build and forces you to
-#   re-grant Accessibility / Input Monitoring permissions on every build.
+#   retain the same signing identity across builds. Otherwise, tries an
+#   Apple Development identity before falling back to adhoc signing ("-").
+#   A stable identity helps macOS recognize rebuilt apps for permissions.
 #
 #   Force a specific identity by setting CODESIGN_IDENTITY=<name or hash>.
 # ============================================================================
 
-# Note: do NOT use `set -u` — `local` variables fall out of scope after
-# subshell calls (xcodebuild, codesign), which would trigger spurious
-# "unbound variable" errors.
 set -eo pipefail
 
 APP_NAME="EzSwitch"
@@ -262,9 +259,8 @@ build_dmg() {
 
     cp -R "$app_path" "$staging/"
 
-    # Always sign the DMG / Portable copy with a universal ad-hoc signature (-)
-    # so it is not tied to any local Apple Development Team ID and can be opened
-    # on any other Mac (or uploaded to GitHub Releases).
+    # Ad-hoc sign the DMG / Portable copy so distribution does not depend on
+    # the local Apple Development signing identity used for development builds.
     log "${YELLOW}🌍 Signing DMG app with portable universal signature (for other Macs / GitHub)…${NC}"
     codesign --force --deep \
         --sign "-" \
@@ -375,7 +371,7 @@ case "$MODE" in
         ;;
     release)
         # Portable build for distribution to other Macs / GitHub Releases:
-        # uses universal ad-hoc signature + Hardened Runtime + stable Designated Requirement
+        # Uses ad-hoc signing, Hardened Runtime, and an identifier-based requirement.
         export CODESIGN_IDENTITY="-"
         build_app
         build_dmg

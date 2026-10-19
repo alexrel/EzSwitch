@@ -6,10 +6,9 @@ import Carbon
 /// call sites so they can be tweaked and audited in one place.
 enum Constants {
 
-    // MARK: - Carbon / HIToolbox Modifier Masks
-    // Same bit values as `shiftKey` / `cmdKey` / `optionKey` / `controlKey`
-    // in HIToolbox/Events.h. Used by `Hotkey` to encode/decode modifier
-    // sets, and by the keyboard event monitor to translate `CGEventFlags`.
+    // MARK: - Stored Hotkey Modifier Masks
+    // Persisted bit values used by Hotkey. Convert them explicitly to CGEventFlags;
+    // they are not interchangeable with UCKeyTranslate or Carbon modifier masks.
     enum ModifierMask {
         static let command: UInt32 = 0x100
         static let shift:   UInt32 = 0x200
@@ -19,7 +18,7 @@ enum Constants {
 
     // MARK: - UCKeyTranslate Modifier Masks
     // Separate, smaller bitfield used by `UCKeyTranslate`
-    // (UnicodeUtilities.h). Not interchangeable with the HIToolbox
+    // (UnicodeUtilities.h). Not interchangeable with the stored hotkey
     // masks above.
     enum UCTModifier {
         static let none:   UInt32 = 0
@@ -141,9 +140,8 @@ enum Constants {
         /// UserDefaults keys for the layout switcher pair.
         ///
         /// The *values* are stable input source ids (`com.apple.keylayout.*`).
-        /// The keys changed from `leftCommandLanguage`/`rightCommandLanguage`
-        /// at the same time, so stale name-based values are simply ignored
-        /// instead of leaking into the id-based storage.
+        /// Older versions used `leftCommandLanguage`/`rightCommandLanguage`.
+        /// These new keys do not migrate those legacy values.
         static let leftCommandLayout        = "leftCommandLayout"
         static let rightCommandLayout       = "rightCommandLayout"
         static let enableTransformKey         = "enableTransformKey"

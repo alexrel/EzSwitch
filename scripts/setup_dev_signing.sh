@@ -2,10 +2,9 @@
 # ============================================================================
 # setup_dev_signing.sh
 # ----------------------------------------------------------------------------
-# Sets up a stable codesigning identity so that builds of EzSwitch always
-# produce the same signature. This prevents macOS from treating each new
-# build as a brand-new application and forcing you to re-grant
-# Accessibility / Input Monitoring permissions after every build.
+# Sets up a stable codesigning identity so rebuilt apps retain a consistent
+# designated requirement. This helps macOS recognize the app when checking
+# Accessibility / Input Monitoring permissions.
 #
 # Strategies (tried in order):
 #
@@ -14,7 +13,9 @@
 #      creates automatically once you sign in with an Apple ID.
 #      If found, this is used as the signing identity.
 #
-#   2. Self-signed via Keychain Access (manual, ~2 minutes)
+#   2. Existing "EzSwitch Dev" certificate in the login keychain.
+#
+#   3. Self-signed via Keychain Access (manual)
 #      Provides step-by-step GUI instructions to create a code-signing
 #      certificate yourself using macOS's built-in Keychain Access app.
 #

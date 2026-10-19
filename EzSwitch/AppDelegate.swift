@@ -15,10 +15,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 3. Initialize StatusBar
         statusBarController = StatusBarController()
 
-        // 4. Keyboard monitoring is started by SettingsManager.shared on init
-        //    (it reads suppressTransformKey from UserDefaults and passes
-        //    `suppressEvents:` accordingly). We do NOT call startMonitoring()
-        //    here unconditionally, as that would override the user's setting.
+        // 4. SettingsManager starts monitoring when the settings are initialized.
+        //    Do not start it again here: that could override configured suppression.
 
         // 5. If Accessibility not granted — warn user (for TextTransformer/selection)
         DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Timing.accessibilityCheckDelaySec) {
@@ -32,7 +30,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Flush debounced preset writes first — the termination below tears
         // down the keyboard pipeline, and a pending write must not be lost.
         MapperStore.shared.flush()
-        // KeyboardManager stops itself on deinit, but explicit stop is safer
         KeyboardManager.shared.stopMonitoring()
     }
 

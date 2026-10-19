@@ -46,7 +46,7 @@ enum WordMatcher {
     /// - Else if `original` is "capitalized" (first letter upper, rest lower)
     ///   → uppercase only the first letter of `target`.
     /// - Else → per-character case copy, padding the shorter string with
-    ///   spaces (so `"git"` typed as `"GiT"` doesn't bleed into the buffer).
+    ///   spaces when the source and target lengths differ.
     static func restoreCase(from original: String, to target: String) -> String {
         let letters = original.filter { $0.isLetter }
         guard !letters.isEmpty else { return target }

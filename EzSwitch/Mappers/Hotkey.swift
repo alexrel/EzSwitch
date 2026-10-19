@@ -7,8 +7,8 @@ import Carbon
 struct Hotkey: Codable, Equatable, Hashable {
     /// Virtual key code (e.g. kVK_ANSI_M = 46).
     var keyCode: UInt16
-    /// Carbon-style modifier mask. We use the same bits as HIToolbox so
-    /// we can compare directly with `CGEventFlags` translated values.
+    /// Persisted modifier mask using Constants.ModifierMask bit values.
+    /// Convert explicitly through cgFlags before comparing with CGEventFlags.
     ///   cmdKey     = 0x100
     ///   shiftKey   = 0x200
     ///   optionKey  = 0x40
@@ -49,12 +49,12 @@ struct Hotkey: Codable, Equatable, Hashable {
         return f
     }
 
-    /// True if `flags` matches our modifier set (we ignore extra modifiers
-    /// the user may be holding — e.g. Caps Lock).
+    /// Match Command, Shift, Option, and Control exactly, ignoring Caps Lock/Fn.
+    /// The caller checks the key code separately.
     ///
     /// An unset hotkey never matches anything: without this guard
     /// `Hotkey.none` (keyCode 0, modifiers 0) would compare equal to a bare
-    /// keypress with no modifiers held and fire on every such key.
+    /// keypress with no modifiers held when checking modifiers alone.
     func matches(flags: CGEventFlags) -> Bool {
         guard isSet else { return false }
         // Required modifiers we expect to be set

@@ -95,9 +95,9 @@ struct KeycapsView: View {
 
 /// Modal sheet for assigning a keyboard shortcut to an action.
 ///
-/// Uses a local NSEvent monitor (so the global CGEvent tap in
-/// `KeyboardManager` is bypassed while the recorder has focus) to
-/// capture the next key combination the user presses.
+/// Uses a local NSEvent monitor to capture the next key combination.
+/// KeyboardManager separately disables word substitution in EzSwitch windows;
+/// a local monitor does not bypass the global event tap.
 struct HotkeyRecorderView: View {
     @Binding var hotkey: Hotkey
     let actionName: String
@@ -164,7 +164,6 @@ struct HotkeyRecorderView: View {
                 Spacer()
             }
 
-            // Modern bordered actions
             HStack(spacing: 8) {
                 Button {
                     captured = Hotkey.none

@@ -89,7 +89,7 @@ final class MapperStore: ObservableObject {
         persist()
     }
 
-    /// Create a new preset for a pair, with optional auto-generated mapping
+    /// Create a new preset for a pair using the supplied mapping.
     @discardableResult
     func createPreset(
         name: String,
@@ -185,8 +185,8 @@ final class MapperStore: ObservableObject {
         }
         work.cancel()
         persistWork = nil
-        // Read the live list here (main-confined) and write synchronously so
-        // the data is on disk by the time this returns.
+        // Write the live list synchronously, after any disk writes already queued,
+        // so the latest data is on disk by the time this returns.
         let snapshot = presets
         queue.sync { writePresets(snapshot) }
     }

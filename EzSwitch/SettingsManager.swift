@@ -44,8 +44,8 @@ enum TransformKeyType: String, CaseIterable {
 
 /// Modifier used by the layout-switch feature. Both Left and Right keys always
 /// react (one per language), so this only picks the modifier family (⌘ or ⌥).
-/// Independent of the transform key, so you can mix & match without conflict
-/// (e.g. layout switch on Option, transform on double Shift).
+/// Configured separately from the transform key, allowing combinations such
+/// as layout switch on Option and transform on double Shift.
 enum SwitchModifier: String, CaseIterable {
     case command = "cmd"
     case option  = "opt"
@@ -81,7 +81,7 @@ final class SettingsManager: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
-    /// Layout bound to the left Command key, as a stable input source id
+    /// Layout bound to the left switch key, as a stable input source id
     /// (`com.apple.keylayout.*`). Never a localized name — see `LayoutRegistry`.
     @Published var leftCommandLayout: String {
         didSet {
@@ -89,7 +89,7 @@ final class SettingsManager: ObservableObject {
         }
     }
 
-    /// Layout bound to the right Command key — same rules as `leftCommandLayout`.
+    /// Layout bound to the right switch key — same rules as `leftCommandLayout`.
     @Published var rightCommandLayout: String {
         didSet {
             defaults.set(rightCommandLayout, forKey: Constants.DefaultsKey.rightCommandLayout)
@@ -175,8 +175,8 @@ final class SettingsManager: ObservableObject {
 
     /// Order-independent lookup of the selected preset ID for a language pair.
     /// Returns the same preset ID whether `(a, b)` is `(Russian – PC, ABC)` or `(ABC, Russian – PC)`.
-    /// Keys are compared in normalized form (see `LayoutPair.key`), so a pair
-    /// saved before a layout rename still resolves.
+    /// Both orientations use normalized keys (see `LayoutPair.key`), which
+    /// handle case and dash differences but do not translate renamed layouts.
     func selectedPresetId(for a: String, _ b: String) -> String? {
         let direct = LayoutPair(from: a, to: b).key
         let inverse = LayoutPair(from: b, to: a).key

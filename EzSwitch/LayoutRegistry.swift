@@ -5,13 +5,11 @@ import Carbon
 ///
 /// A layout's localized name is whatever the system reports for the current
 /// language: `Russian – PC` under English, `Русская — ПК` under Russian. It
-/// changes the moment the language changes, so it can never be persisted —
-/// every stored name silently stops matching afterwards, and switching or
-/// preset lookup quietly does nothing.
+/// can change with the system language, so persisted names may stop matching.
 ///
 /// `kTISPropertyInputSourceID` (`com.apple.keylayout.RussianWin`) does not
-/// change. That id is what EzSwitch stores everywhere; the localized name is
-/// only ever derived from it, for display.
+/// depend on the system language. New settings use IDs; legacy files may
+/// still contain names. Resolve the localized name for display.
 enum LayoutRegistry {
 
     /// A layout as offered to the user: stable `id` plus localized `name`.
@@ -67,8 +65,7 @@ enum LayoutRegistry {
 
     /// Rows for one side of a mapping pair (the mapper window).
     ///
-    /// No "None" on the source side: there is always a layout to map from. The
-    /// target side passes the chosen source as `excluded`, since a mapping
+    /// The target side passes the chosen source as `excluded`, since a mapping
     /// from a layout to itself carries no information. If excluding it leaves
     /// nothing — the system has a single layout — "—" comes back so the picker
     /// still has a row to show.

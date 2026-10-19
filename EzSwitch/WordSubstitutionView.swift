@@ -5,7 +5,7 @@ import SwiftUI
 /// Unified word-level mappings for the active language pair. Each entry
 /// says: when the user types `source`, auto-replace it with `target`.
 /// Case (Shift/Caps) is automatically preserved by `WordMatcher`.
-/// To get bidirectional behavior, check "Save both ways".
+/// For reverse behavior, add the reverse substitution separately.
 struct WordSubstitutionView: View {
 
     private struct WordEntry: Identifiable {
@@ -314,8 +314,8 @@ struct WordSubstitutionView: View {
 // MARK: - Unified Word Substitution Sheet (Add & Edit)
 
 /// Sheet for adding or editing a word substitution.
-/// Language-agnostic (`Source → Target`), with automatic translation button (`Auto`),
-/// and bidirectional (`Save both ways`) toggle. Case is preserved automatically.
+/// Language-agnostic (`Source → Target`), with an automatic translation button
+/// (`Auto`). Case is preserved automatically by WordMatcher.
 private struct WordEntrySheet: View {
     let title: String
     let fromLayout: String
