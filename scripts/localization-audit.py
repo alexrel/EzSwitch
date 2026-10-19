@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CATS = {"en": "EzSwitch/en.lproj/Localizable.strings",
@@ -73,6 +74,18 @@ def parse_catalog(path):
     return keys
 
 
+def placeholder_only(value):
+    """True when a value is nothing but format placeholders, digits, spaces or
+    punctuation (e.g. "%@", "⌘⇧M", "—") — en == ru is then expected, not a gap.
+
+    Python's `re` has no \\p{P}, so Unicode punctuation is tested via
+    `unicodedata` instead of a regex class.
+    """
+    return all(c in "%@" or c.isspace() or c.isdigit()
+               or unicodedata.category(c).startswith("P")
+               for c in value)
+
+
 def main():
     cats = {k: parse_catalog(os.path.join(ROOT, v)) for k, v in CATS.items()}
     texts = {k: set() for k in PATTERNS}
@@ -128,7 +141,7 @@ def main():
         print(f"  ru-only: {k}")
 
     untranslated = sorted(k for k in en if k in ru and en[k] == ru[k]
-                          and not re.fullmatch(r"[%@\d\s\p{P}]*", en[k], re.UNICODE)
+                          and not placeholder_only(en[k])
                           and en[k].strip() and any(c.isalpha() for c in en[k]))
     print(f"\n=== identical en/ru values (candidates for untranslated): {len(untranslated)} ===")
     for k in untranslated[:40]:

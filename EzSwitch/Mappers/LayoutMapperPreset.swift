@@ -1,8 +1,15 @@
 import Foundation
 
-/// Represents a pair of keyboard layouts (source → target)
+/// Represents a pair of keyboard layouts (source → target).
+///
+/// `from`/`to` are stable input source ids (`com.apple.keylayout.*`), not
+/// localized names — see `LayoutRegistry` for why. Equality, hashing and
+/// storage keys all normalize both sides, so a pair saved under one macOS
+/// version is still found under the next.
 struct LayoutPair: Hashable, Codable {
+    /// Stable input source id of the source layout.
     let from: String
+    /// Stable input source id of the target layout.
     let to: String
 
     init(from: String, to: String) {
@@ -10,13 +17,16 @@ struct LayoutPair: Hashable, Codable {
         self.to = to
     }
 
-    /// Canonical form of a single layout name: localized names differ in dash
-    /// style (`–` vs `—` vs `-`), letter case and surrounding whitespace.
-    /// This is the one place that defines "same layout" — equality, hashing
-    /// and storage keys all go through it so a pair saved as "Russian – PC|ABC"
-    /// is found again no matter which variant the system reports later.
+    /// Canonical form of a single layout value.
+    ///
+    /// Ids are already stable, so this mostly reduces to case folding. The
+    /// dash and whitespace folding is kept for values saved before ids were
+    /// used, which still hold a localized name — those differ in dash style
+    /// (`–` vs `—` vs `-`) and letter case depending on the system language.
+    /// This is the one place that defines "same layout".
     static func normalized(_ name: String) -> String {
         name
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
             .replacingOccurrences(of: "—", with: "-")
             .replacingOccurrences(of: "–", with: "-")
             .trimmingCharacters(in: .whitespaces)
@@ -63,10 +73,11 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     /// Display name for this preset
     var name: String
 
-    /// Source layout name (e.g., "Russian – PC")
+    /// Source layout — stable input source id (e.g. `com.apple.keylayout.RussianWin`).
+    /// Never a localized name: see `LayoutRegistry`.
     let fromLayout: String
 
-    /// Target layout name (e.g., "ABC")
+    /// Target layout — stable input source id (e.g. `com.apple.keylayout.ABC`).
     let toLayout: String
 
     /// Character mapping: source character → target character
@@ -140,6 +151,12 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     var pair: LayoutPair {
         return LayoutPair(from: fromLayout, to: toLayout)
     }
+
+    /// Localized source layout name. `fromLayout`/`toLayout` hold stable
+    /// input source ids — resolve them right before showing them.
+    var displayFromLayout: String { LayoutRegistry.displayName(forID: fromLayout) }
+    /// Localized target layout name. See `displayFromLayout`.
+    var displayToLayout: String { LayoutRegistry.displayName(forID: toLayout) }
 
     /// Number of mapped characters
     var mappingCount: Int { mapping.count }

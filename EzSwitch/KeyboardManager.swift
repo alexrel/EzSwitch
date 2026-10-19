@@ -49,7 +49,8 @@ final class KeyboardManager {
     /// and must not run on the main thread: the event tap lives on the main
     /// run loop, so blocking main delays delivery of every real keystroke.
     private let workQueue = DispatchQueue(label: "ezswitch.keyboard.work", qos: .userInteractive)
-    /// Last layout we switched TO or currently active layout name.
+    /// Last layout we switched TO or the currently active layout, as a stable
+    /// input source id (never a localized name — see `LayoutRegistry`).
     public private(set) var currentLayoutID: String = ""
     /// Previous layout before the current switch (used to determine where we came from).
     public private(set) var previousLayoutID: String = ""
@@ -58,9 +59,7 @@ final class KeyboardManager {
     private let deleteKeyCode: Int = Constants.KeyCode.delete // kVK_Delete (backspace)
 
     private init() {
-        if let initial = currentLayoutName() {
-            currentLayoutID = initial
-        }
+        _ = currentInputSourceID()
 
         // Observe layout changes system-wide from Carbon / macOS.
         // The distributed notification is delivered on an arbitrary thread,
@@ -73,7 +72,7 @@ final class KeyboardManager {
                 guard let observer = observer else { return }
                 DispatchQueue.main.async {
                     let manager = Unmanaged<KeyboardManager>.fromOpaque(observer).takeUnretainedValue()
-                    _ = manager.currentLayoutName()
+                    _ = manager.currentInputSourceID()
                 }
             },
             kTISNotifySelectedKeyboardInputSourceChanged,
@@ -88,7 +87,7 @@ final class KeyboardManager {
             queue: .main
         ) { [weak self] _ in
             self?.wordBuffer.removeAll()
-            _ = self?.currentLayoutName()
+            _ = self?.currentInputSourceID()
         }
     }
 
@@ -256,9 +255,9 @@ final class KeyboardManager {
             // 3) Switch-modifier logic (Command or Option, left/right as configured)
             let isDown = flags.contains(ourMask)
             if switchMod.tracksLeft && keyCode == switchMod.leftKeyCode {
-                updateCmd(&leftCmd, isDown: isDown, now: now, lang: SettingsManager.shared.leftCommandLanguage)
+                updateCmd(&leftCmd, isDown: isDown, now: now, layoutID: SettingsManager.shared.leftCommandLayout)
             } else if switchMod.tracksRight && keyCode == switchMod.rightKeyCode {
-                updateCmd(&rightCmd, isDown: isDown, now: now, lang: SettingsManager.shared.rightCommandLanguage)
+                updateCmd(&rightCmd, isDown: isDown, now: now, layoutID: SettingsManager.shared.rightCommandLayout)
             }
 
             // 4) Transform key logic (Shift or Option)
@@ -378,45 +377,47 @@ final class KeyboardManager {
         return (false, false)
     }
 
-    private func updateCmd(_ state: inout KeyState, isDown: Bool, now: TimeInterval, lang: String) {
+    /// Track one switch-modifier key and switch on release.
+    ///
+    /// - Parameter layoutID: stable input source id bound to this key.
+    private func updateCmd(_ state: inout KeyState, isDown: Bool, now: TimeInterval, layoutID: String) {
         guard SettingsManager.shared.commandSwitchEnabled else { return }
 
         if isDown && !state.isDown {
             state = KeyState(isDown: true, downAt: now, cancelled: false)
         } else if !isDown && state.isDown {
             if !state.cancelled && (now - state.downAt) < commandMaxHold {
-                // Only `switchToLayout` updates `currentLayoutID` /
+                // Only `switchToLayout(id:)` updates `currentLayoutID` /
                 // `previousLayoutID` — pre-assigning here would make its
                 // "previous != current" check always false and silently stop
                 // `previousLayoutID` from tracking where we came from.
-                switchToLayout(named: lang)
+                switchToLayout(id: layoutID)
             }
             state.isDown = false
         }
     }
 
-    func switchToLayout(named: String) {
-        if named == Constants.Default.noneLanguage { return }
+    /// Switch to the layout with this stable id and record it as current.
+    ///
+    /// Matching is by input source id, never by localized name: the name the
+    /// system reports depends on the current language (`Russian – PC` in
+    /// English, `Русская — ПК` in Russian), so comparing it against a stored
+    /// name used to make switching silently do nothing.
+    func switchToLayout(id: String) {
+        guard !id.isEmpty, id != Constants.Default.noneLanguage else { return }
+        guard let source = KeyboardLayoutUtility.inputSource(forLayout: id) else { return }
 
-        let sources = TISCreateInputSourceList(nil, false).takeRetainedValue() as! [TISInputSource]
-        for s in sources {
-            if let ptr = TISGetInputSourceProperty(s, kTISPropertyLocalizedName) {
-                let name = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
-                // Compare tolerantly: system localized names differ in dash
-                // style / case from what the user picked in the settings.
-                if LayoutPair.namesMatch(name, named) {
-                    // Update tracking only after a successful select — otherwise
-                    // `currentLayoutID` would "stick" to a name that was never
-                    // actually applied when no source matched.
-                    if !currentLayoutID.isEmpty && !LayoutPair.namesMatch(currentLayoutID, named) {
-                        previousLayoutID = currentLayoutID
-                    }
-                    currentLayoutID = named
-                    TISSelectInputSource(s)
-                    break
-                }
-            }
+        // Prefer the id TIS reports over the requested value: it is the exact
+        // identity of the source we are about to select, and it normalizes
+        // legacy name-based values away. Update tracking only after a
+        // successful select — otherwise `currentLayoutID` would "stick" to an
+        // id that was never actually applied when no source matched.
+        let selectedID = KeyboardLayoutUtility.inputSourceID(of: source) ?? id
+        if !currentLayoutID.isEmpty, currentLayoutID != selectedID {
+            previousLayoutID = currentLayoutID
         }
+        currentLayoutID = selectedID
+        TISSelectInputSource(source)
     }
 
     // MARK: - Word-level substitution
@@ -549,7 +550,7 @@ final class KeyboardManager {
             DispatchQueue.main.async { [weak self] in
                 self?.isReplacingWord = false
                 if let target = targetLayout {
-                    self?.switchToLayout(named: target)
+                    self?.switchToLayout(id: target)
                 }
             }
         }
@@ -582,7 +583,7 @@ final class KeyboardManager {
 
                         DispatchQueue.main.async { [weak self] in
                             self?.isReplacingWord = false
-                            self?.switchToLayout(named: pair.to)
+                            self?.switchToLayout(id: pair.to)
                         }
                     }
                 }
@@ -607,7 +608,7 @@ final class KeyboardManager {
                     self?.pasteText(other)
                     DispatchQueue.main.async { [weak self] in
                         self?.isReplacingWord = false
-                        self?.switchToLayout(named: pair.to)
+                        self?.switchToLayout(id: pair.to)
                     }
                 }
             }
@@ -632,8 +633,8 @@ final class KeyboardManager {
     /// direction there would replace words against the wrong dictionary.
     private func currentActivePair() -> LayoutPair? {
         let settings = SettingsManager.shared
-        let left = settings.leftCommandLanguage
-        let right = settings.rightCommandLanguage
+        let left = settings.leftCommandLayout
+        let right = settings.rightCommandLayout
         guard !left.isEmpty, !right.isEmpty,
               left != Constants.Default.noneLanguage,
               right != Constants.Default.noneLanguage,
@@ -643,26 +644,36 @@ final class KeyboardManager {
         // Use the live layout first (handles the common case of typing
         // without ever tapping the switch modifier), fall back to the cached
         // value.
-        let current = currentLayoutName() ?? currentLayoutID
+        let current = currentInputSourceID() ?? currentLayoutID
         if LayoutPair.namesMatch(current, left) { return LayoutPair(from: left, to: right) }
         if LayoutPair.namesMatch(current, right) { return LayoutPair(from: right, to: left) }
         return nil
     }
 
-    /// Localized name of the keyboard layout currently driving key events.
-    func currentLayoutName() -> String? {
-        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
+    /// Stable id of the keyboard layout currently driving key events.
+    ///
+    /// Read from TIS on every call, so it stays correct after a language
+    /// change; `currentLayoutID` is only the cached copy used when TIS is
+    /// unavailable. Each read keeps `previousLayoutID` pointing at the layout
+    /// the user came from.
+    @discardableResult
+    func currentInputSourceID() -> String? {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let id = KeyboardLayoutUtility.inputSourceID(of: source) else {
             return currentLayoutID.isEmpty ? nil : currentLayoutID
         }
-        guard let ptr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) else {
-            return currentLayoutID.isEmpty ? nil : currentLayoutID
-        }
-        let name = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
-        if !currentLayoutID.isEmpty && !LayoutPair.namesMatch(currentLayoutID, name) {
+        if !currentLayoutID.isEmpty, currentLayoutID != id {
             previousLayoutID = currentLayoutID
         }
-        currentLayoutID = name
-        return name
+        currentLayoutID = id
+        return id
+    }
+
+    /// Localized name of the keyboard layout currently driving key events.
+    /// Display only — comparisons and storage use `currentInputSourceID()`.
+    func currentLayoutName() -> String? {
+        guard let id = currentInputSourceID() else { return nil }
+        return LayoutRegistry.displayName(forID: id)
     }
 
     /// Erase `originalLength` chars (since the separator key event was already

@@ -198,8 +198,8 @@ final class MapperStore: ObservableObject {
     /// any installed layout — no hardcoded mapping needed.
     private func seedAutoPreset() {
         let settings = SettingsManager.shared
-        let from = settings.leftCommandLanguage
-        let to = settings.rightCommandLanguage
+        let from = settings.leftCommandLayout
+        let to = settings.rightCommandLayout
 
         // Skip if either side is "None" or both are the same — nothing useful
         // to map. The user can still build a preset manually later.
@@ -217,7 +217,9 @@ final class MapperStore: ObservableObject {
         }
 
         let preset = LayoutMapperPreset(
-            name: "\(from) ↔ \(to) (auto)",
+            // The stored pair is ids; a preset name has to read like the
+            // layouts the user recognizes.
+            name: "\(LayoutRegistry.displayName(forID: from)) ↔ \(LayoutRegistry.displayName(forID: to)) (auto)",
             fromLayout: from,
             toLayout: to,
             mapping: mapping

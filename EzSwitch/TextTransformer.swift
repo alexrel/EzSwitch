@@ -34,7 +34,7 @@ final class TextTransformer {
         Log.transform.debug("Transform requested (skipLayout=\(skipLayoutSwitch ? "yes" : "no", privacy: .public))")
 
         let km = KeyboardManager.shared
-        let currentLayout = km.currentLayoutName() ?? km.currentLayoutID
+        let currentLayout = km.currentInputSourceID() ?? km.currentLayoutID
         let previousLayout = km.previousLayoutID
 
         workQueue.async { [weak self] in
@@ -116,7 +116,7 @@ final class TextTransformer {
             if let target = plan.targetLayout {
                 Log.transform.debug("Branch A: switching layout to \(target, privacy: .public)")
                 // `currentLayoutID`/`previousLayoutID` are main-confined.
-                DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(named: target) }
+                DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(id: target) }
             }
         } else if skipLayoutSwitch {
             Log.transform.debug("Branch A: layout switch skipped (modifier held)")
@@ -185,7 +185,7 @@ final class TextTransformer {
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
                 Log.transform.debug("Branch B: switching layout to \(target, privacy: .public)")
-                DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(named: target) }
+                DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(id: target) }
             }
         } else if skipLayoutSwitch {
             Log.transform.debug("Branch B: layout switch skipped (modifier held)")
@@ -406,7 +406,7 @@ final class TextTransformer {
 
     private func charactersProduced(by layout: String) -> Set<Character> {
         if let cached = layoutCharacterCache[layout] { return cached }
-        let entries = KeyboardLayoutUtility.characterTable(forLayoutNamed: layout)
+        let entries = KeyboardLayoutUtility.characterTable(forLayout: layout)
             .filter { $0.modifier == .none || $0.modifier == .shift }
         let set = Set(entries.map { $0.character })
         layoutCharacterCache[layout] = set
@@ -519,7 +519,7 @@ final class TextTransformer {
         // Layout snapshots arrive from the caller (main thread) — do not
         // touch KeyboardManager's main-confined state from this queue.
         let settings = SettingsManager.shared
-        let primaryLanguages = [settings.leftCommandLanguage, settings.rightCommandLanguage]
+        let primaryLanguages = [settings.leftCommandLayout, settings.rightCommandLayout]
             .filter { $0 != Constants.Default.noneLanguage && !$0.isEmpty }
 
         // Source layout: whatever layout can actually type the text, not the

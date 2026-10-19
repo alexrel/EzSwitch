@@ -64,11 +64,11 @@ class StatusBarController: NSObject {
         
         if settings.commandSwitchEnabled {
             status += "\n\n\(settings.switchModifier.displayName):"
-            if settings.leftCommandLanguage != Constants.Default.noneLanguage {
-                status += "\n  Left → \(settings.leftCommandLanguage)"
+            if settings.leftCommandLayout != Constants.Default.noneLanguage {
+                status += "\n  Left → \(LayoutRegistry.displayName(forID: settings.leftCommandLayout))"
             }
-            if settings.rightCommandLanguage != Constants.Default.noneLanguage {
-                status += "\n  Right → \(settings.rightCommandLanguage)"
+            if settings.rightCommandLayout != Constants.Default.noneLanguage {
+                status += "\n  Right → \(LayoutRegistry.displayName(forID: settings.rightCommandLayout))"
             }
         }
         

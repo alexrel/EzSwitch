@@ -8,7 +8,7 @@ struct MapperSettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @State private var fromLayout: String = ""
     @State private var toLayout: String = ""
-    @State private var availableLayouts: [String] = []
+    @State private var availableLayouts: [LayoutRegistry.Layout] = []
 
     var initialMode: EditorMode = .character
 
@@ -71,19 +71,22 @@ struct MapperSettingsView: View {
         .frame(minWidth: 780, minHeight: 560)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
-            reloadLayouts()
+            availableLayouts = LayoutRegistry.available()
             if fromLayout.isEmpty {
                 fromLayout = savedLayout(forKey: Constants.DefaultsKey.lastMapperFromLayout)
-                    ?? (settings.leftCommandLanguage != Constants.Default.noneLanguage
-                        ? settings.leftCommandLanguage
-                        : Constants.Default.leftLanguage)
+                    ?? (settings.leftCommandLayout != Constants.Default.noneLanguage
+                        ? settings.leftCommandLayout
+                        : Constants.Default.leftLayoutID)
             }
             if toLayout.isEmpty {
                 toLayout = savedLayout(forKey: Constants.DefaultsKey.lastMapperToLayout)
-                    ?? (settings.rightCommandLanguage != Constants.Default.noneLanguage
-                        ? settings.rightCommandLanguage
-                        : Constants.Default.rightLanguage)
+                    ?? (settings.rightCommandLayout != Constants.Default.noneLanguage
+                        ? settings.rightCommandLayout
+                        : Constants.Default.rightLayoutID)
             }
+            // A remembered pair can be stale: the layout may have been removed
+            // from the system, or both sides may have ended up the same.
+            normalizePair()
             mode = initialMode
             working = selectPresetForCurrentPair()
         }
@@ -93,6 +96,9 @@ struct MapperSettingsView: View {
             }
         }
         .onChange(of: fromLayout) { _, newVal in
+            // Choosing a source the target already uses has to move the
+            // target, or the pair would map a layout onto itself.
+            normalizePair()
             UserDefaults.standard.set(newVal, forKey: Constants.DefaultsKey.lastMapperFromLayout)
             working = selectPresetForCurrentPair()
         }
@@ -156,8 +162,8 @@ struct MapperSettingsView: View {
                     .foregroundColor(.accentColor)
 
                 Picker("", selection: $fromLayout) {
-                    ForEach(layoutOptions, id: \.self) { l in
-                        Text(l).tag(l)
+                    ForEach(fromLayoutOptions) { layout in
+                        Text(layout.label).tag(layout.id)
                     }
                 }
                 .labelsHidden()
@@ -168,8 +174,8 @@ struct MapperSettingsView: View {
                     .foregroundColor(.secondary.opacity(0.8))
 
                 Picker("", selection: $toLayout) {
-                    ForEach(layoutOptions, id: \.self) { l in
-                        Text(l).tag(l)
+                    ForEach(toLayoutOptions) { layout in
+                        Text(layout.label).tag(layout.id)
                     }
                 }
                 .labelsHidden()
@@ -227,7 +233,7 @@ struct MapperSettingsView: View {
                         toLayout: toLayout
                     )
                     let auto = store.createPreset(
-                        name: "\(fromLayout) ↔ \(toLayout) (auto)",
+                        name: "\(displayFromLayout) ↔ \(displayToLayout) (auto)",
                         from: fromLayout,
                         to: toLayout,
                         mapping: mapping
@@ -250,21 +256,45 @@ struct MapperSettingsView: View {
     /// Restore a previously used layout, but only if it is still installed.
     private func savedLayout(forKey key: String) -> String? {
         guard let saved = UserDefaults.standard.string(forKey: key),
-              availableLayouts.contains(saved) else { return nil }
+              availableLayouts.contains(where: { $0.id == saved }) else { return nil }
         return saved
     }
 
-    private var layoutOptions: [String] {
-        KeyboardLayoutUtility.layoutOptions(
-            availableLayouts,
-            including: [fromLayout, toLayout]
-        )
+    /// Source side: every enabled layout and no "—" — a mapping always has a
+    /// layout to start from.
+    private var fromLayoutOptions: [LayoutRegistry.Layout] {
+        LayoutRegistry.mapperOptions(availableLayouts, including: [toLayout], excluding: "")
     }
 
-    private func reloadLayouts() {
-        availableLayouts = KeyboardLayoutUtility.enabledLayoutNames()
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    /// Target side: every layout except the chosen source, because a mapping
+    /// from a layout to itself carries no information. When the system has a
+    /// single layout there is nothing left, and the row becomes "—".
+    private var toLayoutOptions: [LayoutRegistry.Layout] {
+        LayoutRegistry.mapperOptions(availableLayouts, including: [fromLayout], excluding: fromLayout)
     }
+
+    /// Keep the pair valid.
+    ///
+    /// The source is always a real, enabled layout; the target is always a
+    /// different one — except when the system offers a single layout, where
+    /// there is nothing to map to and "—" is the honest answer.
+    private func normalizePair() {
+        let layouts = availableLayouts
+        let none = Constants.Default.noneLanguage
+
+        if fromLayout.isEmpty || !layouts.contains(where: { $0.id == fromLayout }) {
+            fromLayout = layouts.first?.id ?? none
+        }
+
+        if toLayout.isEmpty || toLayout == fromLayout {
+            toLayout = layouts.first(where: { $0.id != fromLayout })?.id ?? none
+        }
+    }
+
+    /// Localized names of the selected pair. `fromLayout`/`toLayout` hold
+    /// stable input source ids, which mean nothing to the user.
+    private var displayFromLayout: String { LayoutRegistry.displayName(forID: fromLayout) }
+    private var displayToLayout: String { LayoutRegistry.displayName(forID: toLayout) }
 }
 
 // MARK: - Working Editor Wrapper
@@ -305,11 +335,17 @@ struct NewPresetSheet: View {
     @State private var name: String = ""
     @State private var generateAuto: Bool = true
 
+    /// Localized names of the pair. `fromLayout`/`toLayout` hold stable
+    /// input source ids, which mean nothing to the user — and would make a
+    /// terrible default preset name.
+    private var displayFromLayout: String { LayoutRegistry.displayName(forID: fromLayout) }
+    private var displayToLayout: String { LayoutRegistry.displayName(forID: toLayout) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(String(localized: "New preset"))
                 .font(.headline)
-            Text("\(fromLayout) → \(toLayout)")
+            Text("\(displayFromLayout) → \(displayToLayout)")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
@@ -330,7 +366,8 @@ struct NewPresetSheet: View {
                     .controlSize(.small)
                 Button {
                     var p = LayoutMapperPreset(
-                        name: name.isEmpty ? "\(fromLayout) → \(toLayout)" : name,
+                        // Default to the readable pair, not the raw ids.
+                        name: name.isEmpty ? "\(displayFromLayout) → \(displayToLayout)" : name,
                         fromLayout: fromLayout,
                         toLayout: toLayout
                     )

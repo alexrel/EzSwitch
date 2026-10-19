@@ -28,6 +28,11 @@ struct WordSubstitutionView: View {
     @State private var showHotkeySheet: Bool = false
     @State private var editingEntry: WordEntry? = nil
 
+    /// Localized names of the selected pair. `fromLayout`/`toLayout` hold
+    /// stable input source ids, which mean nothing to the user.
+    private var displayFromLayout: String { LayoutRegistry.displayName(forID: fromLayout) }
+    private var displayToLayout: String { LayoutRegistry.displayName(forID: toLayout) }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -42,8 +47,8 @@ struct WordSubstitutionView: View {
         }
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
-            fromLayout = !selectedFromLayout.isEmpty ? selectedFromLayout : settings.leftCommandLanguage
-            toLayout = !selectedToLayout.isEmpty ? selectedToLayout : settings.rightCommandLanguage
+            fromLayout = !selectedFromLayout.isEmpty ? selectedFromLayout : settings.leftCommandLayout
+            toLayout = !selectedToLayout.isEmpty ? selectedToLayout : settings.rightCommandLayout
         }
         .onChange(of: selectedFromLayout) { _, newVal in
             if !newVal.isEmpty { fromLayout = newVal }
@@ -130,7 +135,7 @@ struct WordSubstitutionView: View {
                 showClearConfirmation = false
             }
         } message: {
-            Text(String(localized: "All word substitutions for \(fromLayout) ↔ \(toLayout) will be removed."))
+            Text(String(localized: "All word substitutions for \(displayFromLayout) ↔ \(displayToLayout) will be removed."))
         }
     }
 
@@ -169,7 +174,7 @@ struct WordSubstitutionView: View {
                                 .fill(Color.accentColor.opacity(0.12))
                         )
                 }
-                Text("\(fromLayout) ↔ \(toLayout)")
+                Text("\(displayFromLayout) ↔ \(displayToLayout)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -240,7 +245,7 @@ struct WordSubstitutionView: View {
                 Image(systemName: "textformat")
                     .font(.system(size: 40))
                     .foregroundColor(.secondary.opacity(0.4))
-                Text(String(localized: "No word substitutions for \(fromLayout) ↔ \(toLayout)"))
+                Text(String(localized: "No word substitutions for \(displayFromLayout) ↔ \(displayToLayout)"))
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                 HStack(spacing: 4) {
@@ -331,6 +336,11 @@ private struct WordEntrySheet: View {
         case target
     }
 
+    /// Localized names of the pair. `fromLayout`/`toLayout` hold stable
+    /// input source ids, which mean nothing to the user.
+    private var displayFromLayout: String { LayoutRegistry.displayName(forID: fromLayout) }
+    private var displayToLayout: String { LayoutRegistry.displayName(forID: toLayout) }
+
     var body: some View {
         VStack(spacing: 14) {
             // Top: Title on left, language pair badge on right
@@ -338,7 +348,7 @@ private struct WordEntrySheet: View {
                 Text(title)
                     .font(.headline)
                 Spacer()
-                Text("\(fromLayout) ↔ \(toLayout)")
+                Text("\(displayFromLayout) ↔ \(displayToLayout)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 8)

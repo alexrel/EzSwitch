@@ -11,6 +11,7 @@ cp scripts/LogicTests.swift "$TESTS_DIR/main.swift"
 
 swiftc -O \
     EzSwitch/Constants.swift \
+    EzSwitch/LayoutRegistry.swift \
     EzSwitch/Mappers/KeyboardLayoutUtility.swift \
     EzSwitch/Mappers/LayoutMapperPreset.swift \
     EzSwitch/Mappers/LayoutMapperPreset+Transform.swift \

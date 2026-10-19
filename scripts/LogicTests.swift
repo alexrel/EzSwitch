@@ -135,12 +135,88 @@ func testLayoutPairNormalization() {
           "pairKey uses the same normalization")
 }
 
+// MARK: - Layout identity (stable ids)
+
+/// Guards the language-switch regression: a layout's *localized* name changes
+/// with the system language (`Russian – PC` in English, `Русская — ПК` in
+/// Russian), so storing or comparing names silently stopped working the moment
+/// the language changed. Storage and comparison go through stable input source
+/// ids instead.
+func testLayoutIdentityUsesStableIDs() {
+    let russian = "com.apple.keylayout.RussianWin"
+    let abc = "com.apple.keylayout.ABC"
+
+    check(LayoutPair(from: russian, to: abc) == LayoutPair(from: russian, to: abc),
+          "id pairs compare equal")
+    check(russian != abc, "distinct layouts have distinct ids")
+
+    // What the `ru` localization actually emits is "Русская — ПК" with a
+    // non-breaking space before the dash — folding that is what keeps old
+    // name-based values comparable at all.
+    check(LayoutPair.normalized("Русская\u{00A0}— ПК") == LayoutPair.normalized("Русская — ПК"),
+          "non-breaking space is normalized")
+    check(LayoutPair.normalized("Russian – PC") == LayoutPair.normalized("Russian - PC"),
+          "en dash folds to hyphen")
+
+    // Storage keys work the same way for ids as they did for names: the key
+    // joins the *normalized* halves, so ids differing only in case still fold.
+    let pair = LayoutPair(from: russian, to: abc)
+    check(LayoutPair.migrateKey("\(russian)|\(abc)") == pair.key,
+          "migrated key equals new key for ids")
+    check(pair.key == Constants.WordSub.pairKey(from: LayoutPair.normalized(russian),
+                                                to: LayoutPair.normalized(abc)),
+          "pair key joins the normalized halves")
+    check(pair.key == LayoutPair(from: Constants.Default.leftLayoutID,
+                                 to: Constants.Default.rightLayoutID).key,
+          "default pair key normalizes the same way")
+}
+
+// MARK: - Mapper pair options
+
+/// The mapper's From/To pickers must never offer an impossible pair: a mapping
+/// always has a source (no "—"), and a target that differs from it.
+func testMapperPairOptions() {
+    let ru = LayoutRegistry.Layout(id: "com.apple.keylayout.RussianWin", name: "Русская — ПК")
+    let abc = LayoutRegistry.Layout(id: "com.apple.keylayout.ABC", name: "ABC")
+    let he = LayoutRegistry.Layout(id: "com.apple.keylayout.Hebrew", name: "Иврит")
+    let layouts = [ru, abc, he]
+    let none = Constants.Default.noneLanguage
+
+    // Source side: every layout, no "—".
+    let source = LayoutRegistry.mapperOptions(layouts, excluding: "")
+    check(Set(source.map(\.id)) == Set(layouts.map(\.id)),
+          "source side lists every layout")
+    check(!source.contains { $0.id == none }, "source side never offers \"—\"")
+
+    // Target side: the chosen source is gone, the rest stay.
+    let target = LayoutRegistry.mapperOptions(layouts, including: [ru.id], excluding: ru.id)
+    check(!target.contains { $0.id == ru.id }, "target side excludes the chosen source")
+    check(target.contains { $0.id == abc.id } && target.contains { $0.id == he.id },
+          "target side keeps the other layouts")
+
+    // An excluded layout is not smuggled back in as a configured extra.
+    check(target.filter { $0.id == ru.id }.count == 0, "extras cannot re-add the excluded layout")
+
+    // A single-layout system leaves nothing to map to: "—" is the answer.
+    let degenerate = LayoutRegistry.mapperOptions([ru], including: [ru.id], excluding: ru.id)
+    check(degenerate.map(\.id) == [none], "single-layout system falls back to \"—\"")
+
+    // The switcher card keeps "—": a command key may be bound to nothing.
+    let switcher = LayoutRegistry.switcherOptions([ru, abc])
+    check(switcher.first?.id == none, "switcher options lead with \"—\"")
+    check(switcher.map(\.id).filter { $0 == none }.count == 1, "\"—\" appears exactly once")
+    check(LayoutRegistry.Layout(id: none, name: none).label == "—",
+          "the \"—\" row renders as an em dash, not as a word")
+}
+
 // MARK: - Run
 
 testWordMatcher()
 testPresetTransform()
 testHotkeyCoding()
 testLayoutPairNormalization()
+testLayoutIdentityUsesStableIDs()
+testMapperPairOptions()
 
 if failures == 0 {
     print("✅ All logic tests passed")

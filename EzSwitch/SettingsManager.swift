@@ -81,15 +81,18 @@ final class SettingsManager: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
-    @Published var leftCommandLanguage: String {
+    /// Layout bound to the left Command key, as a stable input source id
+    /// (`com.apple.keylayout.*`). Never a localized name — see `LayoutRegistry`.
+    @Published var leftCommandLayout: String {
         didSet {
-            defaults.set(leftCommandLanguage, forKey: Constants.DefaultsKey.leftCommandLanguage)
+            defaults.set(leftCommandLayout, forKey: Constants.DefaultsKey.leftCommandLayout)
         }
     }
 
-    @Published var rightCommandLanguage: String {
+    /// Layout bound to the right Command key — same rules as `leftCommandLayout`.
+    @Published var rightCommandLayout: String {
         didSet {
-            defaults.set(rightCommandLanguage, forKey: Constants.DefaultsKey.rightCommandLanguage)
+            defaults.set(rightCommandLayout, forKey: Constants.DefaultsKey.rightCommandLayout)
         }
     }
 
@@ -194,8 +197,8 @@ final class SettingsManager: ObservableObject {
     }
 
     private init() {
-        self.leftCommandLanguage = defaults.string(forKey: Constants.DefaultsKey.leftCommandLanguage) ?? Constants.Default.leftLanguage
-        self.rightCommandLanguage = defaults.string(forKey: Constants.DefaultsKey.rightCommandLanguage) ?? Constants.Default.rightLanguage
+        self.leftCommandLayout = defaults.string(forKey: Constants.DefaultsKey.leftCommandLayout) ?? Constants.Default.leftLayoutID
+        self.rightCommandLayout = defaults.string(forKey: Constants.DefaultsKey.rightCommandLayout) ?? Constants.Default.rightLayoutID
         // Default to Command (Left and Right both react, one per language) so
         // existing users keep their previous behavior.
         self.switchModifier = SwitchModifier(rawValue: defaults.string(forKey: Constants.DefaultsKey.switchModifier) ?? Constants.Default.switchModifierRaw) ?? .command
@@ -219,7 +222,10 @@ final class SettingsManager: ObservableObject {
             self.wordRememberHotkey = .default
         }
 
-        Log.settings.debug("Loaded: left=\(self.leftCommandLanguage, privacy: .public), right=\(self.rightCommandLanguage, privacy: .public), transform=\(self.transformKeyType.displayName, privacy: .public)")
+        // Log what the user actually sees (localized names) alongside the
+        // stored ids — a mismatch here is exactly what makes a setting look
+        // correct while doing nothing.
+        Log.settings.debug("Loaded: left=\(self.leftCommandLayout, privacy: .public) (\(LayoutRegistry.displayName(forID: self.leftCommandLayout), privacy: .public)), right=\(self.rightCommandLayout, privacy: .public) (\(LayoutRegistry.displayName(forID: self.rightCommandLayout), privacy: .public)), transform=\(self.transformKeyType.displayName, privacy: .public)")
 
         // Apply launch at login setting (macOS 13+)
         setLaunchAtLogin(self.launchAtLogin)

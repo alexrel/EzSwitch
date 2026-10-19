@@ -116,9 +116,12 @@ enum Constants {
 
     // MARK: - Default Settings
     enum Default {
+        /// Sentinel for "no layout chosen". Never a real input source id.
         static let noneLanguage  = "None"
-        static let leftLanguage  = "Russian – PC"
-        static let rightLanguage = "ABC"
+        /// Default switcher pair, as stable input source ids — not localized
+        /// names, which change with the system language (see `LayoutRegistry`).
+        static let leftLayoutID  = "com.apple.keylayout.RussianWin"
+        static let rightLayoutID = "com.apple.keylayout.ABC"
         static let switchModifierRaw    = "cmd"
         static let transformKeyTypeRaw  = "bothOption"
         static let enableTransformKey         = true
@@ -135,8 +138,14 @@ enum Constants {
 
     // MARK: - UserDefaults Keys
     enum DefaultsKey {
-        static let leftCommandLanguage        = "leftCommandLanguage"
-        static let rightCommandLanguage       = "rightCommandLanguage"
+        /// UserDefaults keys for the layout switcher pair.
+        ///
+        /// The *values* are stable input source ids (`com.apple.keylayout.*`).
+        /// The keys changed from `leftCommandLanguage`/`rightCommandLanguage`
+        /// at the same time, so stale name-based values are simply ignored
+        /// instead of leaking into the id-based storage.
+        static let leftCommandLayout        = "leftCommandLayout"
+        static let rightCommandLayout       = "rightCommandLayout"
         static let enableTransformKey         = "enableTransformKey"
         static let transformKeyType           = "transformKeyType"
         static let suppressTransformKey       = "suppressTransformKey"

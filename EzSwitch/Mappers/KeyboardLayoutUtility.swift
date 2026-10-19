@@ -53,18 +53,38 @@ enum KeyboardLayoutUtility {
         return (list as? [TISInputSource]) ?? []
     }
 
-    /// Get input source by localized name
-    static func inputSource(named name: String) -> TISInputSource? {
+    /// Stable input source id, e.g. `com.apple.keylayout.RussianWin`.
+    ///
+    /// Unlike `kTISPropertyLocalizedName` this does not change when the system
+    /// language changes, which is why EzSwitch persists ids and never names.
+    static func inputSourceID(of source: TISInputSource) -> String? {
+        guard let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return nil }
+        let id = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        return id.isEmpty ? nil : id
+    }
+
+    /// Whether the source is enabled and can actually be selected.
+    static func isEnabled(_ source: TISInputSource) -> Bool {
+        guard let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else { return true }
+        return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(ptr).takeUnretainedValue())
+    }
+
+    /// Input source for a stored layout value.
+    ///
+    /// Resolved by stable id. Values saved before ids were introduced still
+    /// hold a localized name, so those fall back to a tolerant name match —
+    /// best effort, and only as long as the language is unchanged.
+    static func inputSource(forLayout value: String) -> TISInputSource? {
         let sources = availableInputSources()
-        for source in sources {
-            if let ptr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) {
-                let localizedName = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
-                if localizedName == name {
-                    return source
-                }
-            }
+
+        if let byID = sources.first(where: { inputSourceID(of: $0) == value }) {
+            return byID
         }
-        return nil
+        guard !value.isEmpty else { return nil }
+        return sources.first { source in
+            guard let name = localizedName(of: source) else { return false }
+            return LayoutPair.namesMatch(name, value)
+        }
     }
 
     /// Get localized name of an input source
@@ -75,45 +95,16 @@ enum KeyboardLayoutUtility {
         return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
     }
 
-    /// Get all enabled keyboard layout names
-    static func enabledLayoutNames() -> [String] {
-        let sources = availableInputSources()
-        var names: [String] = []
-        for source in sources {
-            if let enabledPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) {
-                let enabledCF = Unmanaged<CFBoolean>.fromOpaque(enabledPtr).takeUnretainedValue()
-                if !CFBooleanGetValue(enabledCF) { continue }
-            }
-            if let name = localizedName(of: source), !name.isEmpty {
-                names.append(name)
-            }
-        }
-        return Array(Set(names))
-    }
-
-    /// Sorted list of layout names for a picker, with the "None" option first
-    /// and any extra names (e.g. the currently selected pair) included even if
-    /// the layout is not enabled right now.
-    static func layoutOptions(_ names: [String], including extras: [String] = []) -> [String] {
-        var set = Set(names)
-        set.formUnion(extras.filter { !$0.isEmpty })
-        set.insert(Constants.Default.noneLanguage)
-
-        return set.sorted { a, b in
-            let none = Constants.Default.noneLanguage
-            if a == none { return b != none }
-            if b == none { return false }
-            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-        }
-    }
-
     /// Look up a character for a given key code in a specific layout with modifiers
+    ///
+    /// - Parameter layout: stable layout id. Values saved before ids were
+    ///   introduced still hold a localized name and are resolved too.
     static func character(
         forKeyCode keyCode: UInt16,
         modifier: Modifier,
-        layoutName: String
+        layout: String
     ) -> Character? {
-        guard let source = inputSource(named: layoutName) else {
+        guard let source = inputSource(forLayout: layout) else {
             return nil
         }
         return character(forKeyCode: keyCode, modifier: modifier, inputSource: source)
@@ -175,8 +166,10 @@ enum KeyboardLayoutUtility {
     }
 
     /// Extract complete character table for a layout (all key codes × all modifiers)
-    static func characterTable(forLayoutNamed name: String) -> [CharacterEntry] {
-        guard let source = inputSource(named: name) else {
+    ///
+    /// - Parameter layout: stable layout id (legacy localized names still resolve).
+    static func characterTable(forLayout layout: String) -> [CharacterEntry] {
+        guard let source = inputSource(forLayout: layout) else {
             return []
         }
         return characterTable(for: source)
@@ -233,11 +226,15 @@ enum KeyboardLayoutUtility {
     /// hundreds of exotic Option+letter symbols (e.g. `Ω`, `æ`, `·`, `€`)
     /// that would otherwise pollute the mapping. Users who want to remap
     /// specific Option-symbols can do so manually in the editor.
-    static func buildMapping(fromLayout sourceName: String, toLayout targetName: String) -> [String: String] {
+    ///
+    /// - Parameters:
+    ///   - sourceLayout: stable layout id of the layout being mapped from.
+    ///   - targetLayout: stable layout id of the layout being mapped to.
+    static func buildMapping(fromLayout sourceLayout: String, toLayout targetLayout: String) -> [String: String] {
         // Use only base and Shift — the characters people actually type.
-        let sourceEntries = characterTable(forLayoutNamed: sourceName)
+        let sourceEntries = characterTable(forLayout: sourceLayout)
             .filter { $0.modifier == .none || $0.modifier == .shift }
-        let targetEntries = characterTable(forLayoutNamed: targetName)
+        let targetEntries = characterTable(forLayout: targetLayout)
             .filter { $0.modifier == .none || $0.modifier == .shift }
 
         // Index target entries by (keyCode, modifier)

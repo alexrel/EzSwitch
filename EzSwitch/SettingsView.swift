@@ -7,7 +7,7 @@ struct SettingsView: View {
     @ObservedObject private var wordStore = WordMapperStore.shared
     @ObservedObject private var mapperStore = MapperStore.shared
 
-    @State private var availableLanguages: [String] = []
+    @State private var availableLayouts: [LayoutRegistry.Layout] = []
     @State private var isLoaded = false
     @State private var hasAccessibility = false
     @State private var showAboutPopover = false
@@ -27,10 +27,13 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["GitCommitHash"] as? String
     }
 
-    private var languagesForPicker: [String] {
-        KeyboardLayoutUtility.layoutOptions(
-            availableLanguages,
-            including: [settings.leftCommandLanguage, settings.rightCommandLanguage]
+    /// Picker rows for the switcher pair: `LayoutRegistry.Layout` values whose
+    /// `id` is what gets stored and whose `label` is what gets shown. Either
+    /// key may be bound to nothing, so "—" stays in the list.
+    private var layoutOptions: [LayoutRegistry.Layout] {
+        LayoutRegistry.switcherOptions(
+            availableLayouts,
+            including: [settings.leftCommandLayout, settings.rightCommandLayout]
         )
     }
 
@@ -111,12 +114,12 @@ struct SettingsView: View {
                                         compactLanguagePicker(
                                             icon: "arrow.left",
                                             title: String(localized: "Left"),
-                                            selection: $settings.leftCommandLanguage
+                                            selection: $settings.leftCommandLayout
                                         )
                                         compactLanguagePicker(
                                             icon: "arrow.right",
                                             title: String(localized: "Right"),
-                                            selection: $settings.rightCommandLanguage
+                                            selection: $settings.rightCommandLayout
                                         )
                                     }
                                 }
@@ -397,7 +400,7 @@ struct SettingsView: View {
         .onAppear {
             if !isLoaded {
                 isLoaded = true
-                reloadAvailableLanguages()
+                reloadAvailableLayouts()
                 checkPermissions()
             }
         }
@@ -561,8 +564,8 @@ struct SettingsView: View {
 
     /// Separate binding to avoid Swift compiler "unable to type-check" with inline closures.
     private var presetSelectionBinding: Binding<String> {
-        let left = settings.leftCommandLanguage
-        let right = settings.rightCommandLanguage
+        let left = settings.leftCommandLayout
+        let right = settings.rightCommandLayout
         let presets = availablePresetsForCurrentPair
         return Binding(
             get: {
@@ -629,8 +632,10 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
             Spacer(minLength: 2)
             Picker("", selection: selection) {
-                ForEach(languagesForPicker, id: \.self) { lang in
-                    Text(lang == noneOption ? "—" : lang).tag(lang)
+                ForEach(layoutOptions) { layout in
+                    // Tag is the stable id, label is the localized name — a
+                    // stored id has to survive a language change, a name can't.
+                    Text(layout.label).tag(layout.id)
                 }
             }
             .labelsHidden()
@@ -657,16 +662,16 @@ struct SettingsView: View {
     }
 
     private var availablePresetsForCurrentPair: [LayoutMapperPreset] {
-        let left = settings.leftCommandLanguage
-        let right = settings.rightCommandLanguage
+        let left = settings.leftCommandLayout
+        let right = settings.rightCommandLayout
         guard left != Constants.Default.noneLanguage, right != Constants.Default.noneLanguage else { return [] }
         let pair = LayoutPair(from: left, to: right)
         return MapperStore.shared.presets(for: pair)
     }
 
     private var currentMapperInfo: String {
-        let left = settings.leftCommandLanguage
-        let right = settings.rightCommandLanguage
+        let left = settings.leftCommandLayout
+        let right = settings.rightCommandLayout
         if left == Constants.Default.noneLanguage || right == Constants.Default.noneLanguage {
             return String(localized: "Pick a pair of languages")
         }
@@ -686,8 +691,8 @@ struct SettingsView: View {
     }
 
     private var currentWordSubstitutionInfo: String {
-        let left = settings.leftCommandLanguage
-        let right = settings.rightCommandLanguage
+        let left = settings.leftCommandLayout
+        let right = settings.rightCommandLayout
         if left == noneOption || right == noneOption {
             return String(localized: "Pick a pair of languages")
         }
@@ -710,9 +715,11 @@ struct SettingsView: View {
         MapperWindowController.shared.showWindow(mode: .word)
     }
 
-    private func reloadAvailableLanguages() {
-        availableLanguages = KeyboardLayoutUtility.enabledLayoutNames()
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    /// Re-read the enabled layouts. The picker merges this list with whatever
+    /// is already configured, so a layout switched off in System Settings
+    /// stays visible instead of silently disappearing from the selection.
+    private func reloadAvailableLayouts() {
+        availableLayouts = LayoutRegistry.available()
     }
 
     private func restartApplication() {

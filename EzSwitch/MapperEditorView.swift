@@ -170,7 +170,7 @@ struct MapperEditorView: View {
             }
             Button(String(localized: "Cancel"), role: .cancel) {}
         } message: {
-            Text(String(localized: "All custom key changes in “\(preset.name)” will be replaced with the default \(preset.fromLayout) → \(preset.toLayout) layout mapping."))
+            Text(String(localized: "All custom key changes in “\(preset.name)” will be replaced with the default \(preset.displayFromLayout) → \(preset.displayToLayout) layout mapping."))
         }
         .confirmationDialog(
             String(localized: "Clear all mapped keys in this preset?"),
@@ -204,7 +204,7 @@ struct MapperEditorView: View {
                                 .fill(Color.accentColor.opacity(0.12))
                         )
                 }
-                Text("\(preset.fromLayout) ↔ \(preset.toLayout)")
+                Text("\(preset.displayFromLayout) ↔ \(preset.displayToLayout)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -293,7 +293,7 @@ struct MapperEditorView: View {
 
             // Input field
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: String(localized: "Input (%@)"), preset.fromLayout))
+                Text(String(format: String(localized: "Input (%@)"), preset.displayFromLayout))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 HStack(spacing: 4) {
@@ -324,7 +324,7 @@ struct MapperEditorView: View {
 
             // Result field
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: String(localized: "Result (%@)"), preset.toLayout))
+                Text(String(format: String(localized: "Result (%@)"), preset.displayToLayout))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 TextField("", text: .constant(testOutput))
@@ -357,13 +357,13 @@ struct MapperEditorView: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 HStack(spacing: 4) {
-                    Text(preset.fromLayout)
+                    Text(preset.displayFromLayout)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.secondary)
                     Image(systemName: "arrow.down.right")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundColor(.secondary.opacity(0.6))
-                    Text(preset.toLayout)
+                    Text(preset.displayToLayout)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.accentColor)
                     Text("·")
@@ -512,7 +512,7 @@ struct MapperEditorView: View {
         if let char = KeyboardLayoutUtility.character(
             forKeyCode: key.keyCode,
             modifier: modifier,
-            layoutName: preset.fromLayout
+            layout: preset.fromLayout
         ) {
             return String(char)
         }
@@ -644,7 +644,7 @@ struct MapperEditorView: View {
                         if let auto = KeyboardLayoutUtility.character(
                             forKeyCode: key.keyCode,
                             modifier: pickerModifier,
-                            layoutName: preset.toLayout
+                            layout: preset.toLayout
                         ) {
                             pickerChar = String(auto)
                         }
@@ -709,12 +709,12 @@ struct MapperEditorView: View {
         guard let primary = KeyboardLayoutUtility.character(
             forKeyCode: key.keyCode,
             modifier: modifier == .shiftOption ? .shift : modifier,
-            layoutName: preset.toLayout
+            layout: preset.toLayout
         ) else { return [] }
         guard let secondary = KeyboardLayoutUtility.character(
             forKeyCode: key.keyCode,
             modifier: otherModifier,
-            layoutName: preset.toLayout
+            layout: preset.toLayout
         ) else { return [] }
         return [String(primary), String(secondary)]
     }
