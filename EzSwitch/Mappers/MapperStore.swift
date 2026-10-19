@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import OSLog
 
 /// Manages persistence of `LayoutMapperPreset` instances.
 /// Stores presets in `~/Library/Application Support/EzSwitch/presets.json`.
@@ -113,7 +114,7 @@ final class MapperStore: ObservableObject {
     /// Load presets from JSON file
     private func loadFromDisk() {
         guard fileManager.fileExists(atPath: presetsFileURL.path) else {
-            print("🗂 [MapperStore] No presets file found, starting empty")
+            Log.store.debug("No presets file yet, starting empty")
             return
         }
         do {
@@ -138,9 +139,9 @@ final class MapperStore: ObservableObject {
             if deduplicated.count != loaded.count {
                 persist()
             }
-            print("🗂 [MapperStore] Loaded \(presets.count) preset(s) from disk")
+            Log.store.debug("Loaded \(self.presets.count, privacy: .public) preset(s) from disk")
         } catch {
-            print("⚠️ [MapperStore] Failed to load presets: \(error.localizedDescription)")
+            Log.store.error("Failed to load presets: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -168,9 +169,9 @@ final class MapperStore: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(snapshot)
             try data.write(to: presetsFileURL, options: .atomic)
-            print("🗂 [MapperStore] Saved \(snapshot.count) preset(s) to disk")
+            Log.store.debug("Saved \(snapshot.count, privacy: .public) preset(s) to disk")
         } catch {
-            print("⚠️ [MapperStore] Failed to save presets: \(error.localizedDescription)")
+            Log.store.error("Failed to save presets: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -205,13 +206,13 @@ final class MapperStore: ObservableObject {
         guard !from.isEmpty, !to.isEmpty,
               from != to,
               from != Constants.Default.noneLanguage, to != Constants.Default.noneLanguage else {
-            print("🌱 [MapperStore] Skipping auto-seed: invalid pair (\(from) → \(to))")
+            Log.store.debug("Auto-seed skipped: pair is not usable (\(from, privacy: .public) → \(to, privacy: .public))")
             return
         }
 
         let mapping = KeyboardLayoutUtility.buildMapping(fromLayout: from, toLayout: to)
         guard !mapping.isEmpty else {
-            print("🌱 [MapperStore] Skipping auto-seed: UCKeyTranslate returned empty mapping for \(from) → \(to)")
+            Log.store.debug("Auto-seed skipped: UCKeyTranslate returned no mapping for \(from, privacy: .public) → \(to, privacy: .public)")
             return
         }
 
@@ -224,6 +225,6 @@ final class MapperStore: ObservableObject {
         presets.append(preset)
         settings.setSelectedPresetId(preset.id, for: from, to)
         persist()
-        print("🌱 [MapperStore] Auto-seeded preset for \(from) ↔ \(to) with \(mapping.count) entries")
+        Log.store.debug("Auto-seeded preset for \(from, privacy: .public) ↔ \(to, privacy: .public) with \(mapping.count, privacy: .public) entries")
     }
 }

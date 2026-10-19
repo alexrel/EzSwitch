@@ -73,7 +73,6 @@ final class MapperWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         self.window = newWindow
-        print("🪟 [MapperWindow] Window opened")
     }
 
     // MARK: - NSWindowDelegate
@@ -81,7 +80,6 @@ final class MapperWindowController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if let closing = window, notification.object as? NSWindow === closing {
             window = nil
-            print("🪟 [MapperWindow] Window closed")
         }
     }
 }

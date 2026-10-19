@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import ServiceManagement
 import Combine
 
@@ -83,14 +84,12 @@ final class SettingsManager: ObservableObject {
     @Published var leftCommandLanguage: String {
         didSet {
             defaults.set(leftCommandLanguage, forKey: Constants.DefaultsKey.leftCommandLanguage)
-            print("💾 Saved left language: \(leftCommandLanguage)")
         }
     }
 
     @Published var rightCommandLanguage: String {
         didSet {
             defaults.set(rightCommandLanguage, forKey: Constants.DefaultsKey.rightCommandLanguage)
-            print("💾 Saved right language: \(rightCommandLanguage)")
         }
     }
 
@@ -99,7 +98,6 @@ final class SettingsManager: ObservableObject {
     @Published var switchModifier: SwitchModifier {
         didSet {
             defaults.set(switchModifier.rawValue, forKey: Constants.DefaultsKey.switchModifier)
-            print("💾 Switch modifier: \(switchModifier.displayName)")
         }
     }
 
@@ -113,7 +111,6 @@ final class SettingsManager: ObservableObject {
     @Published var transformKeyType: TransformKeyType {
         didSet {
             defaults.set(transformKeyType.rawValue, forKey: Constants.DefaultsKey.transformKeyType)
-            print("💾 Transform key: \(transformKeyType.displayName)")
         }
     }
 
@@ -170,7 +167,6 @@ final class SettingsManager: ObservableObject {
     @Published var selectedPresetIds: [String: String] {
         didSet {
             defaults.set(selectedPresetIds, forKey: Constants.DefaultsKey.selectedPresetIds)
-            print("💾 Selected preset IDs saved")
         }
     }
 
@@ -223,7 +219,7 @@ final class SettingsManager: ObservableObject {
             self.wordRememberHotkey = .default
         }
 
-        print("🔄 Settings loaded: Left=\(leftCommandLanguage), Right=\(rightCommandLanguage), Transform=\(transformKeyType.displayName)")
+        Log.settings.debug("Loaded: left=\(self.leftCommandLanguage, privacy: .public), right=\(self.rightCommandLanguage, privacy: .public), transform=\(self.transformKeyType.displayName, privacy: .public)")
 
         // Apply launch at login setting (macOS 13+)
         setLaunchAtLogin(self.launchAtLogin)
@@ -245,7 +241,7 @@ final class SettingsManager: ObservableObject {
             KeyboardManager.shared.stopMonitoring()
         }
 
-        print("⌨️ Keyboard monitoring: \(shouldMonitor ? "ON" : "OFF") (cmd=\(commandSwitchEnabled), transform=\(enableTransformKey), wordSub=\(enableWordSubstitution), suppress=\(needsSuppression))")
+        Log.settings.debug("Keyboard monitoring \(shouldMonitor ? "on" : "off", privacy: .public) (commandSwitch=\(self.commandSwitchEnabled ? "on" : "off", privacy: .public), transform=\(self.enableTransformKey ? "on" : "off", privacy: .public), wordSub=\(self.enableWordSubstitution ? "on" : "off", privacy: .public), suppress=\(needsSuppression ? "on" : "off", privacy: .public))")
     }
 
     // macOS 13+: Launch at login without helper application
@@ -260,9 +256,9 @@ final class SettingsManager: ObservableObject {
                     try SMAppService.mainApp.unregister()
                 }
             }
-            print("✅ Launch at login: \(enable ? "enabled" : "disabled") (status: \(SMAppService.mainApp.status))")
+            Log.permissions.debug("Launch at login \(enable ? "enabled" : "disabled", privacy: .public) (status=\(String(describing: SMAppService.mainApp.status), privacy: .public))")
         } catch {
-            print("❌ Failed to change Launch at login: \(error.localizedDescription)")
+            Log.permissions.error("Failed to change launch at login: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

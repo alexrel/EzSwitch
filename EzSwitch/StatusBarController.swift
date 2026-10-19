@@ -1,4 +1,5 @@
 import Cocoa
+import OSLog
 import SwiftUI
 
 class StatusBarController: NSObject {
@@ -24,13 +25,11 @@ class StatusBarController: NSObject {
         
         // Configure status bar
         setupStatusBar()
-        
-        print("✅ StatusBarController initialized")
     }
     
     private func setupStatusBar() {
         guard let button = statusItem.button else {
-            print("❌ Failed to get button for status item")
+            Log.app.error("Status item has no button — the menu bar icon will not work")
             return
         }
         
@@ -52,8 +51,6 @@ class StatusBarController: NSObject {
         
         // Update tooltip
         updateTooltip()
-        
-        print("✅ Status bar configured")
     }
     
     private func updateTooltip() {
@@ -87,16 +84,13 @@ class StatusBarController: NSObject {
     
     @objc func togglePopover(_ sender: AnyObject?) {
         guard let button = statusItem.button else {
-            print("❌ Failed to get button for toggle")
+            Log.app.error("Status item lost its button — cannot toggle the settings popover")
             return
         }
         
         if popover.isShown {
-            print("📪 Closing popover")
             popover.performClose(sender)
         } else {
-            print("📬 Opening popover")
-            
             // Update contentViewController when opening
             let settingsVC = NSHostingController(rootView: SettingsView())
             popover.contentViewController = settingsVC
@@ -108,8 +102,6 @@ class StatusBarController: NSObject {
             
             // Activate application
             NSApp.activate(ignoringOtherApps: true)
-            
-            print("✅ Popover shown")
         }
     }
 }

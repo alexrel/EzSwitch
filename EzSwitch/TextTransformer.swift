@@ -1,6 +1,7 @@
 import Cocoa
 import Carbon
 import ApplicationServices
+import OSLog
 
 final class TextTransformer {
     static let shared = TextTransformer()
@@ -30,8 +31,7 @@ final class TextTransformer {
     /// that follows does not change the layout anyway.
     /// - Parameter skipLayoutSwitch: if true, do not switch layout after transformation
     func transformSelectedText(skipLayoutSwitch: Bool = false) {
-        print("\n🔄 [TextTransformer] ═══════════════════════════════════")
-        print("🔄 [TextTransformer] Transform requested (skipLayout: \(skipLayoutSwitch))")
+        Log.transform.debug("Transform requested (skipLayout=\(skipLayoutSwitch ? "yes" : "no", privacy: .public))")
 
         let km = KeyboardManager.shared
         let currentLayout = km.currentLayoutName() ?? km.currentLayoutID
@@ -52,7 +52,6 @@ final class TextTransformer {
 
         // Branch A: Try to detect and transform selected text
         if let selectedText = tryGetSelectedText() {
-            print("✅ [TextTransformer] Branch A: selection detected")
             completeBranchA(selectedText: selectedText, savedState: savedState,
                             currentLayout: currentLayout, previousLayout: previousLayout,
                             skipLayoutSwitch: skipLayoutSwitch)
@@ -60,7 +59,7 @@ final class TextTransformer {
         }
 
         // Branch B: Transform last word before cursor (no selection)
-        print("🔀 [TextTransformer] Branch A: no selection, trying Branch B (last word)")
+        Log.transform.debug("No selection — falling back to Branch B (last word)")
         tryBranchB_LastWord(savedState: savedState,
                             currentLayout: currentLayout, previousLayout: previousLayout,
                             skipLayoutSwitch: skipLayoutSwitch)
@@ -86,14 +85,12 @@ final class TextTransformer {
 
     /// Attempts to copy selected text using Cmd+C
     private func tryGetSelectedText() -> String? {
-        print("📋 [Branch A] Attempting to copy selection")
-
         guard let copied = copySelection(timeoutMs: copyTimeoutMs) else {
-            print("📋 [Branch A] Copy failed or no selection")
+            Log.transform.debug("Branch A: nothing copied — no selection")
             return nil
         }
 
-        print("📋 [Branch A] Got selection: \"\(copied.prefix(50))\"")
+        Log.transform.debug("Branch A selected: \"\(String(copied.prefix(50)), privacy: .public)\"")
         return copied
     }
 
@@ -103,14 +100,13 @@ final class TextTransformer {
         // Plan multi-language transformation & cycling
         let plan = planTransform(for: selectedText, currentLayout: currentLayout, previousLayout: previousLayout)
         let transformed = plan.transformedText
-        print("🔄 [Branch A] Transform: \"\(selectedText.prefix(30))\" → \"\(transformed.prefix(30))\"")
+        Log.transform.debug("Branch A: \"\(String(selectedText.prefix(30)), privacy: .public)\" → \"\(String(transformed.prefix(30)), privacy: .public)\"")
 
         // Put transformed text to clipboard and paste (single Undo action)
         ClipboardManager.shared.setString(transformed)
         usleep(keySequenceDelayUs)
 
         // Paste replaces selection automatically
-        print("⌨️  [Branch A] Pasting transformed text")
         simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
         usleep(pasteSettleUs)
 
@@ -118,21 +114,18 @@ final class TextTransformer {
         // Skip if modifier key was held during double-tap
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
-                print("⌨️  [Branch A] Switching layout to: \(target)")
+                Log.transform.debug("Branch A: switching layout to \(target, privacy: .public)")
                 // `currentLayoutID`/`previousLayoutID` are main-confined.
                 DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(named: target) }
             }
         } else if skipLayoutSwitch {
-            print("⌨️  [Branch A] Layout switch skipped (modifier held)")
+            Log.transform.debug("Branch A: layout switch skipped (modifier held)")
         }
 
         // Restore clipboard (full state including images, files, etc.)
         DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
             ClipboardManager.shared.restoreState(savedState)
-            print("📋 [Branch A] Clipboard restored")
         }
-
-        print("✅ [Branch A] Complete")
     }
 
     // MARK: - Branch B: Last Word Transform
@@ -146,32 +139,27 @@ final class TextTransformer {
     private func tryBranchB_LastWord(savedState: ClipboardManager.ClipboardState,
                                      currentLayout: String, previousLayout: String,
                                      skipLayoutSwitch: Bool = false) {
-        print("🎯 [Branch B] Starting last-word transform")
-
         // Try to select word using smart method (tries both macOS and IDE shortcuts)
         guard let (rawSelection, _) = trySelectWordBackward() else {
-            print("ℹ️  [Branch B] Could not select word")
+            Log.transform.debug("Branch B: could not select a word")
             ClipboardManager.shared.restoreState(savedState)
             return
         }
-
-        print("📝 [Branch B] Raw selection: \"\(rawSelection)\"")
 
         // Parse selection - extract word and trailing spaces
         let parsed = parseWordSelection(rawSelection)
 
         guard !parsed.word.isEmpty else {
-            print("ℹ️  [Branch B] No word in selection")
+            Log.transform.debug("Branch B: selection \"\(rawSelection, privacy: .public)\" has no word to transform")
             sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow)) // Deselect
             ClipboardManager.shared.restoreState(savedState)
             return
         }
 
-        print("📝 [Branch B] Word: \"\(parsed.word)\", trailing: \(parsed.trailingSpaces.count), leading: \(parsed.leadingSpaces.count)")
+        Log.transform.debug("Branch B word: \"\(parsed.word, privacy: .public)\" (trailing=\(parsed.trailingSpaces.count, privacy: .public), leading=\(parsed.leadingSpaces.count, privacy: .public))")
 
         // If there were leading spaces, shrink selection to exclude them
         if !parsed.leadingSpaces.isEmpty {
-            print("⌨️  [Branch B] Shrinking selection to exclude \(parsed.leadingSpaces.count) leading spaces")
             for _ in parsed.leadingSpaces {
                 sendShiftRight()
                 usleep(Constants.Timing.betweenCharsDelayUs)
@@ -183,13 +171,12 @@ final class TextTransformer {
         let plan = planTransform(for: parsed.word, currentLayout: currentLayout, previousLayout: previousLayout)
         let transformedWord = plan.transformedText
         let replacement = transformedWord + parsed.trailingSpaces
-        print("🔄 [Branch B] Transform: \"\(parsed.word)\" → \"\(transformedWord)\"")
+        Log.transform.debug("Branch B: \"\(parsed.word, privacy: .public)\" → \"\(transformedWord, privacy: .public)\"")
 
         // Put to clipboard and paste (single Undo)
         ClipboardManager.shared.setString(replacement)
         usleep(keySequenceDelayUs)
 
-        print("⌨️  [Branch B] Pasting replacement")
         simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
         usleep(pasteSettleUs)
 
@@ -197,20 +184,17 @@ final class TextTransformer {
         // Skip if modifier key was held during double-tap
         if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
-                print("⌨️  [Branch B] Switching layout to: \(target)")
+                Log.transform.debug("Branch B: switching layout to \(target, privacy: .public)")
                 DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(named: target) }
             }
         } else if skipLayoutSwitch {
-            print("⌨️  [Branch B] Layout switch skipped (modifier held)")
+            Log.transform.debug("Branch B: layout switch skipped (modifier held)")
         }
 
         // Restore clipboard (full state including images, files, etc.)
         DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
             ClipboardManager.shared.restoreState(savedState)
-            print("📋 [Branch B] Clipboard restored")
         }
-
-        print("✅ [Branch B] Complete")
     }
 
     /// Tries to select word backward using app-specific method from AppConfigRegistry
@@ -220,9 +204,9 @@ final class TextTransformer {
         let method = AppConfigRegistry.shared.wordSelectionMethod(for: bundleId)
 
         if let config = AppConfigRegistry.shared.config(for: bundleId) {
-            print("📱 [Branch B] App: \(config.displayName) (\(bundleId ?? "unknown")), method: \(method)")
+            Log.transform.debug("Frontmost app \(config.displayName, privacy: .public) (\(bundleId ?? "unknown", privacy: .public)) → selection method \(method.description, privacy: .public)")
         } else {
-            print("📱 [Branch B] Unknown app: \(bundleId ?? "nil"), using default: \(method)")
+            Log.transform.debug("Frontmost app \(bundleId ?? "unknown", privacy: .public) has no config → default selection method \(method.description, privacy: .public)")
         }
 
         switch method {
@@ -237,7 +221,7 @@ final class TextTransformer {
             if let result = trySelectWithOptionShift() {
                 return result
             }
-            print("⚠️  [Branch B] Option+Shift+Left failed, trying Ctrl+Shift+Left")
+            Log.transform.debug("Option+Shift+Left failed — falling back to Ctrl+Shift+Left")
             return trySelectWithCtrlShift()
         }
     }
@@ -245,8 +229,6 @@ final class TextTransformer {
     /// Selects word using Option+Shift+Left (macOS standard)
     /// Handles cases like "cfvb[" where [ is treated as word boundary
     private func trySelectWithOptionShift() -> (String, String)? {
-        print("⌨️  [Branch B] Using Option+Shift+Left (macOS)")
-
         var fullSelection = ""
         let maxIterations = Constants.WordSelection.maxIterations // Safety limit
 
@@ -256,7 +238,7 @@ final class TextTransformer {
 
             guard let selection = copyCurrentSelection() else {
                 if fullSelection.isEmpty {
-                    print("⚠️  [Branch B] Option+Shift+Left failed - no selection")
+                    Log.transform.debug("Option+Shift+Left: no selection on first press")
                     sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow))
                     usleep(keySequenceDelayUs)
                     return nil
@@ -287,14 +269,14 @@ final class TextTransformer {
             }
 
             // Selection is just punctuation/symbols, continue selecting
-            print("⌨️  [Branch B] Extending selection (iteration \(iteration + 1)): \"\(selection)\"")
+            Log.transform.debug("Extending selection, iteration \(iteration + 1, privacy: .public): \"\(selection, privacy: .public)\"")
         }
 
         if isValidWordSelection(fullSelection) {
-            print("✅ [Branch B] Option+Shift+Left worked: \"\(fullSelection)\"")
+            Log.transform.debug("Option+Shift+Left selected: \"\(fullSelection, privacy: .public)\"")
             return (fullSelection, "option")
         } else {
-            print("⚠️  [Branch B] Option+Shift+Left failed - invalid selection")
+            Log.transform.debug("Option+Shift+Left produced an invalid selection (\"\(fullSelection, privacy: .public)\") — not a single word")
             sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow))
             usleep(keySequenceDelayUs)
             return nil
@@ -303,15 +285,14 @@ final class TextTransformer {
 
     /// Selects word using Ctrl+Shift+Left (IDE standard)
     private func trySelectWithCtrlShift() -> (String, String)? {
-        print("⌨️  [Branch B] Using Ctrl+Shift+Left (IDE)")
         sendCtrlShiftLeft()
         usleep(keySequenceDelayUs)
 
         if let selection = copyCurrentSelection(), isValidWordSelection(selection) {
-            print("✅ [Branch B] Ctrl+Shift+Left worked")
+            Log.transform.debug("Ctrl+Shift+Left selected: \"\(selection, privacy: .public)\"")
             return (selection, "ctrl")
         } else {
-            print("⚠️  [Branch B] Ctrl+Shift+Left failed")
+            Log.transform.debug("Ctrl+Shift+Left produced no usable selection")
             sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow)) // Deselect
             usleep(keySequenceDelayUs)
             return nil
@@ -524,11 +505,11 @@ final class TextTransformer {
                 activeCycle?.currentStepIndex = nextIndex
                 activeCycle?.timestamp = now
                 let step = cycle.steps[nextIndex]
-                print("🔄 [Transform Cycle] Advancing to step \(nextIndex + 1)/\(cycle.steps.count): -> \(step.targetLayout)")
+                Log.transform.debug("Cycle advancing to step \(nextIndex + 1, privacy: .public)/\(cycle.steps.count, privacy: .public) → \(step.targetLayout, privacy: .public)")
                 return TransformPlan(transformedText: step.text, targetLayout: step.targetLayout)
             } else {
                 // Reached end of cycle -> Undo back to original input!
-                print("🔄 [Transform Cycle] Reached end -> Undo to original layout: \(cycle.originalLayout)")
+                Log.transform.debug("Cycle finished — undoing back to \(cycle.originalLayout, privacy: .public)")
                 activeCycle = nil
                 return TransformPlan(transformedText: cycle.originalText, targetLayout: cycle.originalLayout)
             }
@@ -548,7 +529,7 @@ final class TextTransformer {
             current: currentLayout,
             candidates: primaryLanguages + MapperStore.shared.presets.flatMap { [$0.fromLayout, $0.toLayout] }
         )
-        print("🔄 [planTransform] Text: \"\(rawText)\", sourceLayout: \(sourceLayout), current: \(currentLayout), previous: \(previousLayout)")
+        Log.transform.debug("Plan for \"\(rawText, privacy: .public)\": detected source \(sourceLayout, privacy: .public) (current \(currentLayout, privacy: .public), previous \(previousLayout, privacy: .public))")
 
         // Determine target candidates:
         // Candidates are ONLY chosen from the user's primary switcher pair (e.g. Russian and English).
@@ -589,8 +570,12 @@ final class TextTransformer {
 
         // If no preset can transform the text (missing mapping, unknown layout),
         // return it unchanged and leave the active layout alone.
+        // Not an error: a third language with no preset is a normal state, and
+        // the transform legitimately does nothing there. Logged at .debug so a
+        // "double tap did nothing" report can be answered without a debugger.
         if steps.isEmpty {
-            print("⚠️ [planTransform] No preset can transform \(sourceLayout) → \(targetCandidates)")
+            let targets = targetCandidates.joined(separator: ", ")
+            Log.transform.debug("Transform skipped: no preset maps \(sourceLayout, privacy: .public) → \(targets, privacy: .public)")
             return TransformPlan(transformedText: rawText, targetLayout: nil)
         }
 
@@ -604,7 +589,7 @@ final class TextTransformer {
         )
 
         let firstStep = steps[0]
-        print("🔄 [planTransform] Cycle initiated with \(steps.count) step(s). First target: \(firstStep.targetLayout)")
+        Log.transform.debug("New cycle with \(steps.count, privacy: .public) step(s), first target \(firstStep.targetLayout, privacy: .public)")
         return TransformPlan(transformedText: firstStep.text, targetLayout: firstStep.targetLayout)
     }
 

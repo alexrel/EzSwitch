@@ -1,5 +1,6 @@
 import Cocoa
 import Carbon
+import OSLog
 
 final class KeyboardManager {
     static let shared = KeyboardManager()
@@ -119,7 +120,7 @@ final class KeyboardManager {
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     if let tap = KeyboardManager.shared.eventTap {
                         CGEvent.tapEnable(tap: tap, enable: true)
-                        print("⚠️ [KeyboardManager] Event tap re-enabled after timeout")
+                        Log.permissions.error("Event tap was disabled by the system (\(String(describing: type), privacy: .public)) and re-enabled — keys were dropped while it was off")
                     }
                     return Unmanaged.passUnretained(event)
                 }
@@ -129,7 +130,7 @@ final class KeyboardManager {
         )
 
         guard let tap = eventTap else {
-            print("⚠️ KeyboardManager: failed to create event tap (Accessibility permission required)")
+            Log.permissions.error("Failed to create the event tap — Accessibility permission is required. EzSwitch will not react to any key.")
             return
         }
 
@@ -140,7 +141,7 @@ final class KeyboardManager {
         CGEvent.tapEnable(tap: tap, enable: true)
         _isMonitoring = true
 
-        print("⌨️  KeyboardManager: monitoring started (suppress=\(suppressEvents))")
+        Log.permissions.debug("Event tap started (suppress=\(suppressEvents ? "on" : "off", privacy: .public))")
     }
 
     func stopMonitoring() {
@@ -158,7 +159,7 @@ final class KeyboardManager {
         runLoopSource = nil
         _isMonitoring = false
 
-        print("⌨️  KeyboardManager: monitoring stopped")
+        Log.permissions.debug("Event tap stopped")
     }
 
     /// True when EzSwitch itself is the frontmost app (popover, mapper
@@ -360,7 +361,7 @@ final class KeyboardManager {
                 }
 
                 let skipLayoutSwitch = otherShiftHeld
-                print("⌨️  Double \(keyType.shortName) detected! (skipLayout: \(skipLayoutSwitch), L:\(leftShiftDown) R:\(rightShiftDown))")
+                Log.transform.debug("Double \(keyType.shortName, privacy: .public) detected (skipLayout=\(skipLayoutSwitch ? "yes" : "no", privacy: .public), left=\(self.leftShiftDown ? "down" : "up", privacy: .public), right=\(self.rightShiftDown ? "down" : "up", privacy: .public))")
 
                 DispatchQueue.main.async {
                     TextTransformer.shared.transformSelectedText(skipLayoutSwitch: skipLayoutSwitch)
@@ -524,7 +525,7 @@ final class KeyboardManager {
         let replacement = result.replacement
         let targetLayout = result.targetLayout
 
-        print("✨ [WordSub] Auto-replacing \"\(word)\" → \"\(replacement)\" (targetLayout: \(targetLayout ?? "none"))")
+        Log.words.debug("Auto-replacing \"\(word, privacy: .public)\" → \"\(replacement, privacy: .public)\" (targetLayout=\(targetLayout ?? "none", privacy: .public))")
 
         // Perform deletion + paste on a background queue: the sequence blocks
         // for tens of milliseconds (usleep between keystrokes) and would
@@ -618,11 +619,11 @@ final class KeyboardManager {
     private func saveWordAsMapping(_ word: String, pair: LayoutPair) {
         let other = applyCharacterMapping(word, from: pair.from, to: pair.to)
         guard !other.isEmpty, other != word else {
-            print("💡 [WordSub] Skipped remember '\(word)' — no character mapping available")
+            Log.words.debug("Remember skipped for \"\(word, privacy: .public)\" — no character mapping for \(pair.from, privacy: .public) ↔ \(pair.to, privacy: .public)")
             return
         }
         WordMapperStore.shared.set(source: word, target: other, switchLayout: false, for: pair)
-        print("💡 [WordSub] Saved '\(word)' → '\(other)' (switchLayout: false) for pair \(pair.from)|\(pair.to)")
+        Log.words.debug("Remembered \"\(word, privacy: .public)\" → \"\(other, privacy: .public)\" for \(pair.from, privacy: .public)|\(pair.to, privacy: .public)")
     }
 
     /// The pair whose `from` is the current layout. If the current layout is

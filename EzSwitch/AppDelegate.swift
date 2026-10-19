@@ -1,5 +1,6 @@
 import Cocoa
 import ApplicationServices
+import OSLog
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
@@ -7,14 +8,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // 1. Hide from Dock
         NSApp.setActivationPolicy(.accessory)
-        print("✅ Application launched")
 
         // 2. Request required permissions (non-blocking)
         checkAndRequestPermissions()
 
         // 3. Initialize StatusBar
         statusBarController = StatusBarController()
-        print("✅ StatusBar initialized")
 
         // 4. Keyboard monitoring is started by SettingsManager.shared on init
         //    (it reads suppressTransformKey from UserDefaults and passes
@@ -23,10 +22,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 5. If Accessibility not granted — warn user (for TextTransformer/selection)
         DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Timing.accessibilityCheckDelaySec) {
-            if !AXIsProcessTrusted() {
-                print("⚠️ No Accessibility — text transformation (AX) will not work until permission is granted.")
-                self.showAccessibilityAlert()
-            }
+            guard !AXIsProcessTrusted() else { return }
+            Log.permissions.error("Accessibility not granted — text transformation will not work until permission is granted and the app is restarted")
+            self.showAccessibilityAlert()
         }
     }
 
@@ -41,28 +39,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Permissions
 
     private func checkAndRequestPermissions() {
-        print("\n🔍 PERMISSIONS CHECK")
-        print(String(repeating: "=", count: 40))
-
         // Input Monitoring (Privacy & Security → Input Monitoring)
         let listenPreflight = CGPreflightListenEventAccess()
-        print("• Input Monitoring (CGPreflightListenEventAccess): \(listenPreflight ? "✅ ACCESS GRANTED" : "❌ NO ACCESS")")
         if !listenPreflight {
-            print("• Requesting Input Monitoring (CGRequestListenEventAccess)…")
             CGRequestListenEventAccess()
         }
 
         // Accessibility (Privacy & Security → Accessibility)
-        let axSimple = AXIsProcessTrusted()
-        print("• Accessibility (AXIsProcessTrusted): \(axSimple ? "✅ ACCESS GRANTED" : "❌ NO ACCESS")")
-
+        // The prompt is issued here so the system dialog appears early.
         let options: NSDictionary = [
             kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true
         ]
         let axPrompted = AXIsProcessTrustedWithOptions(options)
-        print("• Accessibility prompt issued (AXIsProcessTrustedWithOptions): \(axPrompted ? "✅" : "❌")")
 
-        print(String(repeating: "=", count: 40) + "\n")
+        // Informational only. Both requests above return false while the user
+        // is still looking at the system dialog, so a "not granted" here is
+        // not a failure — the actionable report happens once the user had
+        // time to respond (see the deferred check in applicationDidFinishLaunching).
+        Log.permissions.debug("Permissions at launch: Input Monitoring \(listenPreflight ? "granted" : "requested", privacy: .public), Accessibility \(axPrompted ? "granted" : "prompted", privacy: .public)")
     }
 
     // MARK: - Alerts / Settings
@@ -101,14 +95,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openPrivacySettings() {
-        print("🛠️ Opening Privacy & Security…")
-
         // macOS 13+
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
-            if NSWorkspace.shared.open(url) {
-                print("✅ Settings opened via URL")
-                return
-            }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy"),
+           NSWorkspace.shared.open(url) {
+            return
         }
 
         // Fallback: just open System Settings

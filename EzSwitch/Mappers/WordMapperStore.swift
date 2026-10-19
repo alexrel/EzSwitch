@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import OSLog
 
 /// JSON-backed store of one-way word-level substitutions.
 ///
@@ -187,7 +188,7 @@ final class WordMapperStore: ObservableObject {
         }
 
         guard fileManager.fileExists(atPath: fileURL.path) else {
-            print("🗂 [WordMapperStore] No word mappings file found, starting empty")
+            Log.store.debug("No word mappings file yet, starting empty")
             return
         }
         do {
@@ -197,9 +198,9 @@ final class WordMapperStore: ObservableObject {
             // Merge sources written under different spellings of the same pair.
             mappings = Self.migratePairKeys(rawMappings) { old, new in old.merging(new) { _, n in n } }
             let total = mappings.values.reduce(0) { $0 + $1.count }
-            print("🗂 [WordMapperStore] Loaded \(total) word mapping(s) from disk")
+            Log.store.debug("Loaded \(total, privacy: .public) word mapping(s) from disk")
         } catch {
-            print("⚠️ [WordMapperStore] Failed to load word mappings: \(error.localizedDescription)")
+            Log.store.error("Failed to load word mappings: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -217,9 +218,9 @@ final class WordMapperStore: ObservableObject {
                 let data = try encoder.encode(snapshot)
                 try data.write(to: self.fileURL, options: .atomic)
                 let total = snapshot.values.reduce(0) { $0 + $1.count }
-                print("🗂 [WordMapperStore] Saved \(total) word mapping(s) to disk")
+                Log.store.debug("Saved \(total, privacy: .public) word mapping(s) to disk")
             } catch {
-                print("⚠️ [WordMapperStore] Failed to save word mappings: \(error.localizedDescription)")
+                Log.store.error("Failed to save word mappings: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

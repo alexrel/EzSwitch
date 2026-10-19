@@ -46,7 +46,6 @@ final class ClipboardManager {
             }
         }
 
-        print("📋 [Clipboard] Saved \(items.count) items, \(items.flatMap { $0.types }.count) types")
         return ClipboardState(items: items, changeCount: pb.changeCount)
     }
 
@@ -57,7 +56,6 @@ final class ClipboardManager {
         guard !state.isEmpty else {
             // Buffer was empty — clear it
             pb.clearContents()
-            print("📋 [Clipboard] Restored empty state")
             return
         }
 
@@ -78,7 +76,6 @@ final class ClipboardManager {
         }
 
         pb.writeObjects(restoredItems)
-        print("📋 [Clipboard] Restored \(restoredItems.count) items")
     }
 
     // MARK: - Convenience Methods
