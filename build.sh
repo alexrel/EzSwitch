@@ -36,6 +36,13 @@ fi
 BUNDLE_ID=$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*PRODUCT_BUNDLE_IDENTIFIER = //;s/;//')
 BUNDLE_ID="${BUNDLE_ID:-alexrel.EzSwitch}"
 
+# Single source of truth for the deployment target: project.pbxproj
+# MACOSX_DEPLOYMENT_TARGET. The swiftc fallback below does not go through
+# xcodebuild, so it must be told the same minimum or it would emit a binary
+# accepting an older macOS than the Xcode build does.
+MACOS_MIN=$(grep -m1 'MACOSX_DEPLOYMENT_TARGET' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*MACOSX_DEPLOYMENT_TARGET = //;s/;//')
+MACOS_MIN="${MACOS_MIN:-15.4}"
+
 # Automatically compute build number & git commit hash from git
 BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo "1")
 GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
@@ -166,7 +173,7 @@ build_app() {
                 "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
             /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" \
                 "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
-            /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion 14.0" \
+            /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN" \
                 "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
         fi
         cp -R "EzSwitch/en.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
@@ -174,7 +181,7 @@ build_app() {
         swiftc \
             -module-cache-path "$DERIVED_DATA/ModuleCache.noindex" \
             -sdk "$(xcrun --show-sdk-path)" \
-            -target arm64-apple-macosx14.0 \
+            -target "arm64-apple-macosx$MACOS_MIN" \
             -O \
             -module-name "$APP_NAME" \
             EzSwitch/*.swift EzSwitch/Mappers/*.swift \
@@ -205,7 +212,6 @@ build_app() {
         codesign --force --deep \
             --sign "$SIGN_IDENTITY" \
             --identifier "alexrel.EzSwitch" \
-            --entitlements EzSwitch/EzSwitch.entitlements \
             --options runtime \
             --timestamp=none \
             -r='designated => identifier "alexrel.EzSwitch"' \
@@ -213,7 +219,6 @@ build_app() {
     else
         codesign --force --deep \
             --sign "$SIGN_IDENTITY" \
-            --entitlements EzSwitch/EzSwitch.entitlements \
             --options runtime \
             --timestamp=none \
             "$EXPORT_DIR/$APP_NAME.app" 2>&1 | sed 's/^/   /'
@@ -264,7 +269,6 @@ build_dmg() {
     codesign --force --deep \
         --sign "-" \
         --identifier "alexrel.EzSwitch" \
-        --entitlements EzSwitch/EzSwitch.entitlements \
         --options runtime \
         --timestamp=none \
         -r='designated => identifier "alexrel.EzSwitch"' \

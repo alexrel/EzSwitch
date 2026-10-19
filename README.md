@@ -1,7 +1,7 @@
 # EzSwitch
 
 <p align="center">
-  <img src="icon.png" alt="EzSwitch Icon" width="128" height="128">
+  <img src="screenshots/icon.png" alt="EzSwitch Icon" width="128" height="128">
 </p>
 
 <p align="center">
