@@ -6,6 +6,18 @@ import AppKit
 /// Provides character lookup by virtual key code and modifier state.
 enum KeyboardLayoutUtility {
 
+    // MARK: - Threading
+
+    /// TIS requires the main thread (it asserts on the main queue internally).
+    /// The transform pipeline runs on a background queue to avoid blocking
+    /// keystroke delivery, so TIS-backed lookups hop here instead of asserting.
+    private static func onMain<T>(_ work: () -> T) -> T {
+        if Thread.isMainThread {
+            return work()
+        }
+        return DispatchQueue.main.sync(execute: work)
+    }
+
     // MARK: - Types
 
     /// Modifier flags for character lookup.
@@ -41,6 +53,10 @@ enum KeyboardLayoutUtility {
 
     /// Get all available keyboard input sources
     static func availableInputSources() -> [TISInputSource] {
+        onMain { availableInputSourcesOnMain() }
+    }
+
+    private static func availableInputSourcesOnMain() -> [TISInputSource] {
         let filter: [String: Any] = [
             (kTISPropertyInputSourceCategory as String): (kTISCategoryKeyboardInputSource as String),
             (kTISPropertyInputSourceIsSelectCapable as String): true
@@ -168,11 +184,17 @@ enum KeyboardLayoutUtility {
     ///
     /// - Parameter layout: stable ID, or a legacy name resolvable in the current locale.
     static func characterTable(forLayout layout: String) -> [CharacterEntry] {
+        onMain { characterTableOnMain(forLayout: layout) }
+    }
+
+    private static func characterTableOnMain(forLayout layout: String) -> [CharacterEntry] {
         guard let source = inputSource(forLayout: layout) else {
             return []
         }
         return characterTable(for: source)
-    }    /// Extract complete character table from a TISInputSource
+    }
+
+    /// Extract complete character table from a TISInputSource
     static func characterTable(for source: TISInputSource) -> [CharacterEntry] {
         var entries: [CharacterEntry] = []
         let modifiers: [Modifier] = [.none, .shift, .option, .shiftOption]

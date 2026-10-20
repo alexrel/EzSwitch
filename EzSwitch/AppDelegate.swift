@@ -74,7 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         \(String(localized: "After granting permissions, restart the application."))
         """)
-        informativeText.alignment = .left
+        informativeText.alignment = .natural
         informativeText.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         informativeText.isEditable = false
         informativeText.isBordered = false

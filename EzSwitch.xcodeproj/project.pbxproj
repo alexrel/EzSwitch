@@ -104,6 +104,8 @@
 			knownRegions = (
 				en,
 				ru,
+				he,
+				uk,
 				Base,
 			);
 			mainGroup = BD996D012F0FC00E008B29F2;

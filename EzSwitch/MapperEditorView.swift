@@ -401,6 +401,8 @@ struct MapperEditorView: View {
                     }
                 }
             }
+            // A physical keyboard is always laid out left-to-right, even in RTL locales.
+            .environment(\.layoutDirection, .leftToRight)
             .padding(11)
             .background(
                 ZStack {

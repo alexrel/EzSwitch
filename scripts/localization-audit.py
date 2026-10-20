@@ -7,7 +7,9 @@ import unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CATS = {"en": "EzSwitch/en.lproj/Localizable.strings",
-        "ru": "EzSwitch/ru.lproj/Localizable.strings"}
+        "ru": "EzSwitch/ru.lproj/Localizable.strings",
+        "uk": "EzSwitch/uk.lproj/Localizable.strings",
+        "he": "EzSwitch/he.lproj/Localizable.strings"}
 
 # Every construct that yields a localization lookup.
 PATTERNS = {
@@ -111,13 +113,16 @@ def main():
         all_keys |= keys
     print(f"  {'TOTAL unique':<22} {len(all_keys):>4}")
 
-    en, ru = cats["en"], cats["ru"]
-    print(f"\n=== catalogs ===\n  en {len(en)}   ru {len(ru)}")
+    en = cats["en"]
+    print("\n=== catalogs ===")
+    for code, cat in cats.items():
+        print(f"  {code} {len(cat)}")
 
     missing_en = sorted(k for k in all_keys if k not in en)
-    missing_ru = sorted(k for k in all_keys if k not in ru)
     print(f"\n=== MISSING from catalog ===")
-    print(f"  en: {len(missing_en)}   ru: {len(missing_ru)}")
+    for code, cat in cats.items():
+        missing = sorted(k for k in all_keys if k not in cat)
+        print(f"  {code}: {len(missing)}")
 
     print("\n--- missing, grouped by mechanism ---")
     for name, keys in texts.items():
@@ -132,20 +137,28 @@ def main():
     for k in orphans[:60]:
         print(f"     {k}")
 
-    only_en = sorted(set(en) - set(ru))
-    only_ru = sorted(set(ru) - set(en))
-    print(f"\n=== en/ru asymmetry: en-only={len(only_en)} ru-only={len(only_ru)} ===")
-    for k in only_en:
-        print(f"  en-only: {k}")
-    for k in only_ru:
-        print(f"  ru-only: {k}")
+    print("\n=== catalog asymmetry vs en ===")
+    for code, cat in cats.items():
+        if code == "en":
+            continue
+        only_en = sorted(set(en) - set(cat))
+        only_lang = sorted(set(cat) - set(en))
+        print(f"  {code}: en-only={len(only_en)} {code}-only={len(only_lang)}")
+        for k in only_en:
+            print(f"    en-only: {k}")
+        for k in only_lang:
+            print(f"    {code}-only: {k}")
 
-    untranslated = sorted(k for k in en if k in ru and en[k] == ru[k]
-                          and not placeholder_only(en[k])
-                          and en[k].strip() and any(c.isalpha() for c in en[k]))
-    print(f"\n=== identical en/ru values (candidates for untranslated): {len(untranslated)} ===")
-    for k in untranslated[:40]:
-        print(f"  {k}  =  {en[k]}")
+    print("\n=== identical en/<lang> values (candidates for untranslated) ===")
+    for code, cat in cats.items():
+        if code == "en":
+            continue
+        untranslated = sorted(k for k in en if k in cat and en[k] == cat[k]
+                              and not placeholder_only(en[k])
+                              and en[k].strip() and any(c.isalpha() for c in en[k]))
+        print(f"  {code}: {len(untranslated)}")
+        for k in untranslated[:40]:
+            print(f"    {k}  =  {en[k]}")
 
 
 if __name__ == "__main__":

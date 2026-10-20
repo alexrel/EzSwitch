@@ -175,6 +175,8 @@ build_app() {
         fi
         cp -R "EzSwitch/en.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
         cp -R "EzSwitch/ru.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
+        cp -R "EzSwitch/he.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
+        cp -R "EzSwitch/uk.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
         swiftc \
             -module-cache-path "$DERIVED_DATA/ModuleCache.noindex" \
             -sdk "$(xcrun --show-sdk-path)" \
