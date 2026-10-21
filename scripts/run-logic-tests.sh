@@ -31,9 +31,12 @@ swiftc -O \
     EzSwitch/Constants.swift \
     EzSwitch/LayoutRegistry.swift \
     EzSwitch/TransformSourceDetection.swift \
+    EzSwitch/TransformSnapshot.swift \
+    EzSwitch/Log.swift \
     EzSwitch/Mappers/KeyboardLayoutUtility.swift \
     EzSwitch/Mappers/LayoutMapperPreset.swift \
     EzSwitch/Mappers/LayoutMapperPreset+Transform.swift \
+    EzSwitch/Mappers/MapperStore.swift \
     EzSwitch/Mappers/Hotkey.swift \
     EzSwitch/WordMatcher.swift \
     "$TESTS_DIR/main.swift" \

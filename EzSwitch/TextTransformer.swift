@@ -31,21 +31,30 @@ final class TextTransformer {
     /// that follows does not change the layout anyway.
     /// - Parameter skipLayoutSwitch: if true, do not switch layout after transformation
     func transformSelectedText(skipLayoutSwitch: Bool = false) {
+        dispatchPrecondition(condition: .onQueue(.main))
         Log.transform.debug("Transform requested (skipLayout=\(skipLayoutSwitch ? "yes" : "no", privacy: .public))")
 
         let km = KeyboardManager.shared
         let currentLayout = km.currentInputSourceID() ?? km.currentLayoutID
         let previousLayout = km.previousLayoutID
+        let settings = SettingsManager.shared
+        let snapshot = TransformSnapshot(
+            presets: MapperStore.shared.snapshot(), selectedPresetIDs: settings.selectedPresetIds,
+            primaryLanguages: [settings.leftCommandLayout, settings.rightCommandLayout],
+            switchLayoutAfterTransform: settings.switchLayoutAfterTransform
+        )
 
         workQueue.async { [weak self] in
             self?.runTransform(currentLayout: currentLayout,
                                previousLayout: previousLayout,
+                               snapshot: snapshot,
                                skipLayoutSwitch: skipLayoutSwitch)
         }
     }
 
     /// Runs the actual transform flow on `workQueue`.
-    private func runTransform(currentLayout: String, previousLayout: String, skipLayoutSwitch: Bool) {
+    private func runTransform(currentLayout: String, previousLayout: String,
+                              snapshot: TransformSnapshot, skipLayoutSwitch: Bool) {
         // Save full clipboard state (including images, files, etc.)
         let clipboard = ClipboardManager.shared
         let savedState = clipboard.saveState()
@@ -54,6 +63,7 @@ final class TextTransformer {
         if let selectedText = tryGetSelectedText() {
             completeBranchA(selectedText: selectedText, savedState: savedState,
                             currentLayout: currentLayout, previousLayout: previousLayout,
+                            snapshot: snapshot,
                             skipLayoutSwitch: skipLayoutSwitch)
             return
         }
@@ -62,6 +72,7 @@ final class TextTransformer {
         Log.transform.debug("No selection — falling back to Branch B (last word)")
         tryBranchB_LastWord(savedState: savedState,
                             currentLayout: currentLayout, previousLayout: previousLayout,
+                            snapshot: snapshot,
                             skipLayoutSwitch: skipLayoutSwitch)
     }
 
@@ -96,9 +107,10 @@ final class TextTransformer {
 
     private func completeBranchA(selectedText: String, savedState: ClipboardManager.ClipboardState,
                                  currentLayout: String, previousLayout: String,
+                                 snapshot: TransformSnapshot,
                                  skipLayoutSwitch: Bool = false) {
         // Plan multi-language transformation & cycling
-        let plan = planTransform(for: selectedText, currentLayout: currentLayout, previousLayout: previousLayout)
+        let plan = planTransform(for: selectedText, currentLayout: currentLayout, previousLayout: previousLayout, snapshot: snapshot)
         let transformed = plan.transformedText
         Log.transform.debug("Branch A: \"\(String(selectedText.prefix(30)), privacy: .public)\" → \"\(String(transformed.prefix(30)), privacy: .public)\"")
 
@@ -112,7 +124,7 @@ final class TextTransformer {
 
         // Switch layout if enabled (based on plan.targetLayout)
         // Skip if modifier key was held during double-tap
-        if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
+        if !skipLayoutSwitch && snapshot.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
                 Log.transform.debug("Branch A: switching layout to \(target, privacy: .public)")
                 // `currentLayoutID`/`previousLayoutID` are main-confined.
@@ -138,6 +150,7 @@ final class TextTransformer {
     /// - "еуые|" → "test"
     private func tryBranchB_LastWord(savedState: ClipboardManager.ClipboardState,
                                      currentLayout: String, previousLayout: String,
+                                     snapshot: TransformSnapshot,
                                      skipLayoutSwitch: Bool = false) {
         // Try to select word using smart method (tries both macOS and IDE shortcuts)
         guard let (rawSelection, _) = trySelectWordBackward() else {
@@ -168,7 +181,7 @@ final class TextTransformer {
         }
 
         // Transform and paste (supporting multi-language cycle)
-        let plan = planTransform(for: parsed.word, currentLayout: currentLayout, previousLayout: previousLayout)
+        let plan = planTransform(for: parsed.word, currentLayout: currentLayout, previousLayout: previousLayout, snapshot: snapshot)
         let transformedWord = plan.transformedText
         let replacement = transformedWord + parsed.trailingSpaces
         Log.transform.debug("Branch B: \"\(parsed.word, privacy: .public)\" → \"\(transformedWord, privacy: .public)\"")
@@ -182,7 +195,7 @@ final class TextTransformer {
 
         // Switch layout if enabled (based on plan.targetLayout)
         // Skip if modifier key was held during double-tap
-        if !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform {
+        if !skipLayoutSwitch && snapshot.switchLayoutAfterTransform {
             if let target = plan.targetLayout {
                 Log.transform.debug("Branch B: switching layout to \(target, privacy: .public)")
                 DispatchQueue.main.async { KeyboardManager.shared.switchToLayout(id: target) }
@@ -390,6 +403,7 @@ final class TextTransformer {
     }
 
     private struct TransformCycle {
+        let snapshot: TransformSnapshot
         let originalText: String
         let originalLayout: String
         let steps: [(targetLayout: String, text: String)]
@@ -416,24 +430,11 @@ final class TextTransformer {
     /// Pick the layout the text is most plausibly written in. The current
     /// layout wins ties. Extra-rule sources and targets are evidence even
     /// when they are Option symbols or punctuation absent from the base map.
-    private func detectSourceLayout(for text: String, current: String, candidates: [String]) -> String {
-        let store = MapperStore.shared
-        let settings = SettingsManager.shared
-        var seenPairs = Set<String>()
-        var activePresets: [LayoutMapperPreset] = []
-        for preset in store.presets {
-            let pairKey = [LayoutPair.normalized(preset.fromLayout), LayoutPair.normalized(preset.toLayout)]
-                .sorted().joined(separator: "|")
-            guard seenPairs.insert(pairKey).inserted else { continue }
-            let pairPresets = store.presets(for: preset.pair)
-            let selectedID = settings.selectedPresetId(for: preset.fromLayout, preset.toLayout)
-            if let active = pairPresets.first(where: { $0.id == selectedID }) ?? pairPresets.first {
-                activePresets.append(active)
-            }
-        }
-        return TransformSourceDetection.layout(
+    private func detectSourceLayout(for text: String, current: String, candidates: [String],
+                                    snapshot: TransformSnapshot) -> String {
+        TransformSourceDetection.layout(
             for: text, current: current, candidates: candidates,
-            activePresets: activePresets, charactersProduced: charactersProduced(by:)
+            activePresets: snapshot.activePresets, charactersProduced: charactersProduced(by:)
         )
     }
 
@@ -441,59 +442,17 @@ final class TextTransformer {
         LayoutPair.namesMatch(a, b)
     }
 
-    /// Transforms `text` between any two layouts using direct presets or a bridge hop if needed.
-    func transform(text: String, from fromLayout: String, to toLayout: String) -> String? {
-        transform(text: text, from: fromLayout, to: toLayout, depth: 0)
-    }
-
-    /// `depth` bounds the bridge search: a direct preset needs one hop, a
-    /// bridge needs two. Without a limit, presets that form a cycle
-    /// (A→B, B→C, C→A) recurse forever because each hop changes the text.
-    private func transform(text: String, from fromLayout: String, to toLayout: String, depth: Int) -> String? {
-        guard depth < 3 else { return nil }
-        if layoutsMatch(fromLayout, toLayout) { return text }
-        let store = MapperStore.shared
-
-        // 1. Try direct presets
-        let directPresets = store.presets(for: LayoutPair(from: fromLayout, to: toLayout))
-        let selectedID = SettingsManager.shared.selectedPresetId(for: fromLayout, toLayout)
-        if let preset = directPresets.first(where: { $0.id == selectedID }) ?? directPresets.first {
-            // `apply(_:from:)` picks the direction itself and inverts with
-            // longest-match, so multi-character targets survive the reverse hop.
-            let result = preset.apply(text, from: fromLayout)
-            if result != text { return result }
-        }
-
-        // 2. Try bridging via an intermediate layout (e.g. Hebrew -> Russian -> English)
-        for preset in store.presets {
-            let pair = preset.pair
-            var bridge: String? = nil
-            if layoutsMatch(pair.from, fromLayout) { bridge = pair.to }
-            else if layoutsMatch(pair.to, fromLayout) { bridge = pair.from }
-
-            if let b = bridge, !layoutsMatch(b, fromLayout), !layoutsMatch(b, toLayout) {
-                let secondHop = store.presets(for: LayoutPair(from: b, to: toLayout))
-                if !secondHop.isEmpty {
-                    if let intermediate = transform(text: text, from: fromLayout, to: b, depth: depth + 1),
-                       intermediate != text,
-                       let finalResult = transform(text: intermediate, from: b, to: toLayout, depth: depth + 1) {
-                        return finalResult
-                    }
-                }
-            }
-        }
-        return nil
-    }
-
     /// Plans and returns the text transformation and target layout for a given input word/selection,
     /// supporting multi-language cycling and prioritizing previousLayout.
     /// - Parameters: `currentLayout`/`previousLayout` are snapshots taken on
     ///   the main thread by the caller (this runs on `workQueue`).
-    private func planTransform(for rawText: String, currentLayout: String, previousLayout: String) -> TransformPlan {
+    private func planTransform(for rawText: String, currentLayout: String, previousLayout: String,
+                               snapshot: TransformSnapshot) -> TransformPlan {
         let now = Date()
 
         // 1. Check for consecutive Double Shift (Cycle advancement)
         if let cycle = activeCycle,
+           cycle.snapshot == snapshot,
            now.timeIntervalSince(cycle.timestamp) < Constants.Timing.cycleExpirySec,
            (rawText == cycle.steps[cycle.currentStepIndex].text || rawText == cycle.originalText) {
 
@@ -515,16 +474,16 @@ final class TextTransformer {
         // 2. Fresh transformation
         // Layout snapshots arrive from the caller (main thread) — do not
         // touch KeyboardManager's main-confined state from this queue.
-        let settings = SettingsManager.shared
-        let primaryLanguages = [settings.leftCommandLayout, settings.rightCommandLayout]
-            .filter { $0 != Constants.Default.noneLanguage && !$0.isEmpty }
+        activeCycle = nil
+        let primaryLanguages = snapshot.primaryLanguages
 
         // Source layout: whatever layout can actually type the text, not the
         // layout name. The current input source wins ties.
         let sourceLayout = detectSourceLayout(
             for: rawText,
             current: currentLayout,
-            candidates: primaryLanguages + MapperStore.shared.presets.flatMap { [$0.fromLayout, $0.toLayout] }
+            candidates: primaryLanguages + snapshot.activePresets.flatMap { [$0.fromLayout, $0.toLayout] },
+            snapshot: snapshot
         )
         Log.transform.debug("Plan for \"\(rawText, privacy: .public)\": detected source \(sourceLayout, privacy: .public) (current \(currentLayout, privacy: .public), previous \(previousLayout, privacy: .public))")
 
@@ -559,7 +518,7 @@ final class TextTransformer {
         // Build cycle transformation steps
         var steps: [(targetLayout: String, text: String)] = []
         for candidate in targetCandidates {
-            if let transformed = transform(text: rawText, from: sourceLayout, to: candidate),
+            if let transformed = snapshot.transform(text: rawText, from: sourceLayout, to: candidate),
                transformed != rawText {
                 steps.append((targetLayout: candidate, text: transformed))
             }
@@ -578,6 +537,7 @@ final class TextTransformer {
 
         // Save active cycle state
         activeCycle = TransformCycle(
+            snapshot: snapshot,
             originalText: rawText,
             originalLayout: sourceLayout,
             steps: steps,

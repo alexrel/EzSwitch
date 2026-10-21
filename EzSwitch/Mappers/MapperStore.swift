@@ -6,7 +6,7 @@ import OSLog
 /// Manages persistence of `LayoutMapperPreset` instances.
 /// Stores presets in `~/Library/Application Support/EzSwitch/presets.json`.
 final class MapperStore: ObservableObject {
-    static let shared = MapperStore()
+    static let shared = MapperStore(fileURL: defaultPresetsFileURL)
 
     /// Published list of all presets
     @Published private(set) var presets: [LayoutMapperPreset] = []
@@ -16,8 +16,12 @@ final class MapperStore: ObservableObject {
     private var didAttemptSeed = false
     /// Pending debounced disk write, cancelled and rescheduled on each change.
     private var persistWork: DispatchWorkItem?
+    private let presetsFileURL: URL
+    private var needsBackupBeforeWrite = false
 
-    private init() {
+    init(fileURL: URL) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        presetsFileURL = fileURL
         loadFromDisk()
     }
 
@@ -34,29 +38,25 @@ final class MapperStore: ObservableObject {
 
     // MARK: - File Paths
 
-    /// Application Support directory
-    private var appSupportDirectory: URL {
-        if let url = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let ezswitchURL = url.appendingPathComponent(Constants.FilePath.appSupportFolder, isDirectory: true)
-            if !fileManager.fileExists(atPath: ezswitchURL.path) {
-                try? fileManager.createDirectory(at: ezswitchURL, withIntermediateDirectories: true)
-            }
-            return ezswitchURL
-        }
-        // Fallback to ~/Library/Application Support
-        return URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/\(Constants.FilePath.appSupportFolder)", isDirectory: true)
-    }
-
-    /// JSON file with presets
-    private var presetsFileURL: URL {
-        return appSupportDirectory.appendingPathComponent(Constants.FilePath.presetsFile)
+    private static var defaultPresetsFileURL: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+        return support.appendingPathComponent(Constants.FilePath.appSupportFolder, isDirectory: true)
+            .appendingPathComponent(Constants.FilePath.presetsFile)
     }
 
     // MARK: - Public API
 
+    /// Capture value types on main before sending rules to the transform queue.
+    func snapshot() -> [LayoutMapperPreset] {
+        dispatchPrecondition(condition: .onQueue(.main))
+        ensureSeeded()
+        return presets
+    }
+
     /// Get all presets for a specific layout pair (in either order)
     func presets(for pair: LayoutPair) -> [LayoutMapperPreset] {
+        dispatchPrecondition(condition: .onQueue(.main))
         ensureSeeded()
         let inverse = LayoutPair(from: pair.to, to: pair.from)
         return presets.filter { $0.pair == pair || $0.pair == inverse }
@@ -64,12 +64,14 @@ final class MapperStore: ObservableObject {
 
     /// Get a preset by ID
     func preset(byID id: String) -> LayoutMapperPreset? {
+        dispatchPrecondition(condition: .onQueue(.main))
         ensureSeeded()
         return presets.first(where: { $0.id == id })
     }
 
     /// Save (insert or update) a preset
     func save(_ preset: LayoutMapperPreset) {
+        dispatchPrecondition(condition: .onQueue(.main))
         ensureSeeded()
         var updated = preset
         updated.updatedAt = Date()
@@ -84,6 +86,7 @@ final class MapperStore: ObservableObject {
 
     /// Delete a preset by ID
     func delete(id: String) {
+        dispatchPrecondition(condition: .onQueue(.main))
         ensureSeeded()
         presets.removeAll(where: { $0.id == id })
         persist()
@@ -98,6 +101,7 @@ final class MapperStore: ObservableObject {
         mapping: [String: String] = [:],
         nameStyle: LayoutMapperPreset.NameStyle = .custom
     ) -> LayoutMapperPreset {
+        dispatchPrecondition(condition: .onQueue(.main))
         ensureSeeded()
         let preset = LayoutMapperPreset(
             name: name,
@@ -115,10 +119,6 @@ final class MapperStore: ObservableObject {
 
     /// Load presets from JSON file
     private func loadFromDisk() {
-        guard fileManager.fileExists(atPath: presetsFileURL.path) else {
-            Log.store.debug("No presets file yet, starting empty")
-            return
-        }
         do {
             let data = try Data(contentsOf: presetsFileURL)
             let decoder = JSONDecoder()
@@ -128,25 +128,17 @@ final class MapperStore: ObservableObject {
             for index in loaded.indices where loaded[index].nameStyle == nil {
                 loaded[index].nameStyle = loaded[index].resolvedNameStyle
             }
-            // Deduplicate identical "(auto)" presets created by previous versions
-            var seenAutoNames: Set<String> = []
-            var deduplicated: [LayoutMapperPreset] = []
-            for p in loaded {
-                if p.name.hasSuffix("(auto)") {
-                    // Normalize like `LayoutPair.key` so duplicates written with
-                    // different dash styles/cases are recognized as identical.
-                    let key = "\(LayoutPair.normalized(p.fromLayout))|\(LayoutPair.normalized(p.toLayout))|\(p.name)"
-                    if seenAutoNames.contains(key) { continue }
-                    seenAutoNames.insert(key)
-                }
-                deduplicated.append(p)
-            }
-            presets = deduplicated
-            if migratedNames || deduplicated.count != loaded.count {
+            // Names are not identities: keep every preset and selected ID intact.
+            presets = loaded
+            if migratedNames {
                 persist()
             }
             Log.store.debug("Loaded \(self.presets.count, privacy: .public) preset(s) from disk")
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            Log.store.debug("No presets file yet, starting empty")
         } catch {
+            didAttemptSeed = true
+            needsBackupBeforeWrite = true
             Log.store.error("Failed to load presets: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -174,6 +166,14 @@ final class MapperStore: ObservableObject {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(snapshot)
+            try fileManager.createDirectory(at: presetsFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if needsBackupBeforeWrite {
+                let backup = presetsFileURL.appendingPathExtension("unreadable-\(UUID().uuidString).bak")
+                // If the backup fails, stop before touching the original file.
+                try fileManager.copyItem(at: presetsFileURL, to: backup)
+                needsBackupBeforeWrite = false
+                Log.store.error("Preserved unreadable presets at \(backup.path, privacy: .public)")
+            }
             try data.write(to: presetsFileURL, options: .atomic)
             Log.store.debug("Saved \(snapshot.count, privacy: .public) preset(s) to disk")
         } catch {
@@ -185,6 +185,7 @@ final class MapperStore: ObservableObject {
     /// Call before the values are read by another process, or on termination,
     /// so a debounced write is not lost with the process.
     func flush() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let work = persistWork, !work.isCancelled else {
             persistWork = nil
             return

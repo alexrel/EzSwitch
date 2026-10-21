@@ -9,6 +9,18 @@ import Combine
 //
 // These checks do not cover settings migration or live keyboard/clipboard flows.
 
+// Store tests use explicit files; never initialize the app's event tap or login item.
+final class SettingsManager {
+    static let shared = SettingsManager()
+    private(set) var seedLayoutReads = 0
+    var leftCommandLayout: String {
+        seedLayoutReads += 1
+        return Constants.Default.noneLanguage
+    }
+    var rightCommandLayout: String { Constants.Default.noneLanguage }
+    func setSelectedPresetId(_ id: String?, for from: String, _ to: String) {}
+}
+
 var failures = 0
 
 func check(_ condition: Bool, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -334,6 +346,143 @@ func testPresetDisplayNames() {
     } catch { check(false, "preset name persistence: \(error)") }
 }
 
+func testPresetFileSafety() {
+    let fm = FileManager.default
+    let directory = fm.temporaryDirectory.appendingPathComponent("EzSwitch.StoreTests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? fm.removeItem(at: directory) }
+    do {
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("presets.json")
+        let first = LayoutMapperPreset(name: "A ↔ B (auto)", fromLayout: "A", toLayout: "B", mapping: ["a": "b"])
+        var different = LayoutMapperPreset(name: first.name, fromLayout: "A", toLayout: "B", mapping: ["a": "c"])
+        different.extraMappings = [.init(source: "Ђ", target: "¸", modifier: .shiftOption)]
+        let identical = LayoutMapperPreset(name: first.name, fromLayout: "A", toLayout: "B", mapping: first.mapping)
+        let originals = [first, different, identical]
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(originals).write(to: file)
+
+        let store = MapperStore(fileURL: file)
+        equal(store.snapshot().map(\.id), originals.map(\.id), "same-name presets keep every ID, including identical rules")
+        equal(store.preset(byID: different.id)?.extraMappings, different.extraMappings, "extra rules survive loading")
+        let frozen = store.snapshot()
+        different.mapping["a"] = "edited"
+        store.save(different)
+        equal(frozen[1].mapping["a"], "c", "a captured store snapshot is independent of later edits")
+        store.flush()
+        let reloaded = MapperStore(fileURL: file)
+        equal(reloaded.snapshot().map(\.id), originals.map(\.id), "name migration preserves IDs on disk")
+        equal(reloaded.preset(byID: different.id)?.mapping["a"], "edited", "flush saves the latest edit")
+
+        let corruptFile = directory.appendingPathComponent("corrupt.json")
+        let corruptBytes = Data("[{ incomplete JSON".utf8)
+        try corruptBytes.write(to: corruptFile)
+        let seedReads = SettingsManager.shared.seedLayoutReads
+        let damagedStore = MapperStore(fileURL: corruptFile)
+        check(damagedStore.snapshot().isEmpty, "an unreadable file never auto-seeds a preset")
+        check(damagedStore.presets(for: first.pair).isEmpty, "reading a damaged store does not seed it")
+        damagedStore.flush()
+        equal(SettingsManager.shared.seedLayoutReads, seedReads, "load failure never invokes automatic seeding")
+        equal(try Data(contentsOf: corruptFile), corruptBytes, "opening and flushing leave the unreadable original intact")
+        equal(try fm.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".bak") }.count, 0,
+              "reading alone does not create recovery files")
+
+        let replacement = damagedStore.createPreset(name: "Recovered", from: "A", to: "B", mapping: ["x": "y"])
+        damagedStore.flush()
+        let backups = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "bak" }
+        equal(backups.count, 1, "an explicit save backs up the unreadable file once")
+        if let backup = backups.first {
+            equal(try Data(contentsOf: backup), corruptBytes, "backup preserves the exact original bytes")
+        }
+        equal(MapperStore(fileURL: corruptFile).snapshot().map(\.id), [replacement.id], "explicit edits remain persistable after backup")
+        damagedStore.save(replacement)
+        damagedStore.flush()
+        equal(try fm.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".bak") }.count, 1,
+              "later saves retain the original backup")
+
+        let blockedDirectory = directory.appendingPathComponent("blocked", isDirectory: true)
+        try fm.createDirectory(at: blockedDirectory, withIntermediateDirectories: true)
+        let blockedFile = blockedDirectory.appendingPathComponent("presets.json")
+        try corruptBytes.write(to: blockedFile)
+        let blockedStore = MapperStore(fileURL: blockedFile)
+        // Move the unreadable source away before saving to force a backup failure.
+        let retainedFile = blockedDirectory.appendingPathComponent("retained.json")
+        try fm.moveItem(at: blockedFile, to: retainedFile)
+        blockedStore.save(first)
+        blockedStore.flush()
+        check(!fm.fileExists(atPath: blockedFile.path), "a failed backup aborts the write")
+        equal(try Data(contentsOf: retainedFile), corruptBytes, "backup failure preserves the old bytes")
+        try fm.moveItem(at: retainedFile, to: blockedFile)
+        blockedStore.save(first)
+        blockedStore.flush()
+        equal(MapperStore(fileURL: blockedFile).snapshot().map(\.id), [first.id], "saving can retry after a backup failure")
+
+        let newFile = directory.appendingPathComponent("new/subfolder/presets.json")
+        let newStore = MapperStore(fileURL: newFile)
+        check(newStore.snapshot().isEmpty, "an absent file starts empty when no layout pair is configured")
+        newStore.save(first)
+        newStore.flush()
+        equal(MapperStore(fileURL: newFile).snapshot().map(\.id), [first.id], "first save creates the missing parent directory")
+    } catch {
+        check(false, "preset file safety: \(error)")
+    }
+}
+
+func testTransformSnapshot() {
+    let pair = LayoutPair(from: "A", to: "B")
+    let first = LayoutMapperPreset(name: "First", fromLayout: "A", toLayout: "B", mapping: ["Ђ": "other"])
+    let selected = LayoutMapperPreset(name: "Selected", fromLayout: "A", toLayout: "B",
+                                      extraMappings: [.init(source: "Ђ", target: "¸", modifier: .shiftOption)])
+    let bridge = LayoutMapperPreset(name: "Bridge", fromLayout: "B", toLayout: "C", mapping: ["¸": "z"])
+    var presets = [first, selected, bridge]
+    let inverseKey = LayoutPair(from: "B", to: "A").key
+    var selectedIDs = [inverseKey: selected.id]
+    var languages = ["A", "B", "", Constants.Default.noneLanguage]
+    var shouldSwitch = true
+    let snapshot = TransformSnapshot(presets: presets, selectedPresetIDs: selectedIDs,
+                                     primaryLanguages: languages, switchLayoutAfterTransform: shouldSwitch)
+    equal(snapshot.activePresets.map(\.id), [selected.id, bridge.id], "snapshot honors selected ID in the inverse pair key")
+    equal(snapshot.primaryLanguages, ["A", "B"], "snapshot excludes unset layouts")
+    equal(snapshot.transform(text: "Ђ", from: "A", to: "B"), "¸", "selected extra mapping is applied")
+    equal(snapshot.transform(text: "¸", from: "B", to: "A"), "Ђ", "selected rules also apply in reverse")
+    equal(snapshot.transform(text: "Ђ", from: "A", to: "C"), "z", "bridge hops use the selected rules")
+    equal(snapshot.transform(text: "z", from: "C", to: "A"), "Ђ", "bridge rules reverse consistently")
+    equal(snapshot.transform(text: "Ђ", from: "A", to: "missing"), nil, "missing paths do not transform")
+
+    presets[1].extraMappings[0].target = "new"
+    selectedIDs[inverseKey] = first.id
+    languages = ["C", "B"]
+    shouldSwitch = false
+    let next = TransformSnapshot(presets: presets, selectedPresetIDs: selectedIDs,
+                                 primaryLanguages: languages, switchLayoutAfterTransform: shouldSwitch)
+    let inFlightResult = DispatchQueue.global().sync {
+        snapshot.transform(text: "Ђ", from: "A", to: "B")
+    }
+    equal(inFlightResult, "¸", "background transformation keeps the captured rules after edits on main")
+    equal(snapshot.primaryLanguages, ["A", "B"], "in-flight snapshot keeps its original layouts")
+    check(snapshot.switchLayoutAfterTransform, "in-flight snapshot keeps its layout-switch preference")
+    equal(next.transform(text: "Ђ", from: "A", to: "B"), "other", "the next request picks up the newly selected preset")
+    check(next != snapshot, "changed settings invalidate a previously planned cycle")
+    let edited = TransformSnapshot(presets: presets, selectedPresetIDs: [pair.key: selected.id],
+                                   primaryLanguages: ["A", "B"], switchLayoutAfterTransform: true)
+    equal(edited.transform(text: "Ђ", from: "A", to: "B"), "new", "the next request picks up edited extra rules")
+    let fallback = TransformSnapshot(presets: presets, selectedPresetIDs: [pair.key: "deleted"],
+                                     primaryLanguages: [], switchLayoutAfterTransform: false)
+    equal(fallback.activePresets.first?.id, first.id, "an absent selected preset falls back to the first one")
+    let detected = TransformSourceDetection.layout(for: "Ђ", current: "C", candidates: ["A", "B", "C"],
+                                                   activePresets: snapshot.activePresets, charactersProduced: { _ in [] })
+    equal(detected, "A", "source detection uses the same snapshotted extra rules")
+    let cyclic = TransformSnapshot(presets: [
+        LayoutMapperPreset(name: "AB", fromLayout: "A", toLayout: "B", mapping: ["a": "b"]),
+        LayoutMapperPreset(name: "BC", fromLayout: "B", toLayout: "C", mapping: ["b": "c"]),
+        LayoutMapperPreset(name: "CA", fromLayout: "C", toLayout: "A", mapping: ["c": "a"]),
+        LayoutMapperPreset(name: "AD", fromLayout: "A", toLayout: "D", mapping: ["x": "d"]),
+        LayoutMapperPreset(name: "BD", fromLayout: "B", toLayout: "D", mapping: ["x": "d"]),
+        LayoutMapperPreset(name: "CD", fromLayout: "C", toLayout: "D", mapping: ["x": "d"])
+    ], selectedPresetIDs: [:], primaryLanguages: ["A", "D"], switchLayoutAfterTransform: false)
+    equal(cyclic.transform(text: "a", from: "A", to: "D"), nil, "cyclic bridge paths stop at the depth limit")
+}
+
 func testAppLanguagePreference() {
     let suite = "EzSwitch.LanguageTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -404,6 +553,8 @@ func testLiveLocalization() {
 }
 
 testAppLanguagePreference()
+testPresetFileSafety()
+testTransformSnapshot()
 testLiveLocalization()
 testLiveLayoutNames()
 testPresetDisplayNames()

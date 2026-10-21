@@ -61,10 +61,11 @@
 - **Tactile Dual-Legend Visual Keyboard** — styled after Apple Magic Keyboard dual-legend keycaps (source character in top-left, mapped target character in bottom-right, with LED-lit `Shift` modifier caps); click any key to customize
 - **Multi-character targets** — a single source key can map to a sequence (e.g. `й → "ja"`, `ц → "tz"`, emoji, or symbols)
 - **Extra mappings** — custom source characters, including those typed with Option or Shift+Option, participate in explicit text correction and its preview. Enter the actual produced character as the source. Extra rules override ordinary mappings and support reverse conversion with multi-character targets.
-- **Automatic reverse direction** — store only one preset per language pair; the opposite direction is rebuilt via longest-match (`TextTransformer.applyReverse`)
+- **Automatic reverse direction** — store only one preset per language pair; the opposite direction uses longest-match replacement from the same rules
 - **Confirmation guards** — clicking **Auto** (`✨`), **Clear all keys** (`🧹`), or **Delete preset** (`🗑`) prompts for confirmation before overwriting or deleting custom mappings
 - **Live bidirectional test bar** — test your mapping in either direction directly above the keyboard without risking your saved keys
 - Presets are stored in `~/Library/Application Support/EzSwitch/presets.json`
+- An unreadable presets file is left intact on opening. Before saving new rules, EzSwitch preserves it beside the original as `presets.json.unreadable-<UUID>.bak`; if that backup fails, the save is aborted. Same-name presets retain their separate IDs and rules.
 
 ### Smart Word Substitutions (`Word Substitutions`)
 - **Automatic word-level replacement** — teach EzSwitch words that you frequently mistype in the wrong layout (e.g. `ghbdtn → привет`, `пше → git`); as soon as you type a word (2+ characters) followed by Space, Enter, Tab, or punctuation, it is replaced in place
@@ -226,10 +227,11 @@ The application is written in Swift & SwiftUI (`EzSwitch/*.swift`):
 - **`AppLocalization`**: Live translation bundles, system-language resolution, and locale updates that preserve editor state
 - **`KeyboardManager`**: Monitors global key events via `CGEvent.tapCreate`, tracks single modifier taps, double-tap transform triggers, system layout changes (`kTISNotifySelectedKeyboardInputSourceChanged` for `previousLayout` tracking), and live word buffering for automatic substitutions
 - **`TextTransformer`**: Transforms selected text or the last word before the cursor; features **Multi-Language Pivot & Cycling** with `previousLayout` priority and consecutive double-tap cycling across multiple layouts (with Undo on 3rd press)
+- **`TransformSnapshot`**: Immutable active rules and preferences captured on main for each correction; background source detection and every conversion hop use the same snapshot
 - **`ClipboardManager`**: Preserves and restores the system `NSPasteboard` around synthetic `⌘C` / `⌘V` operations
 - **`SettingsManager`**: Persists user settings in `UserDefaults`, including order-independent active preset selection (`selectedPresetId(for:_:)`)
 - **`AppConfigRegistry`**: Per-application word selection shortcuts (`⌥⇧←` vs `⌃⇧←`) with bundle ID and keyword matching
-- **`MapperStore`**: Thread-safe JSON store (`presets.json`) for `LayoutMapperPreset` models with bidirectional pair matching and first-launch auto-seeding
+- **`MapperStore`**: Main-thread preset state with serialized atomic JSON writes (`presets.json`), bidirectional pair matching, and first-launch auto-seeding
 - **`WordMapperStore` & `WordMatcher`**: Unified per-pair JSON store (`word_mappings.json`) and case-preserving matcher for word-level substitutions with per-word target layout switching
 - **`MapperSettingsView` / `MapperEditorView` / `WordSubstitutionView`**: Unified SwiftUI mapper window with tactile dual-legend keyboard keycaps, persistent layout pair selection, and modern word substitution management
 - **`Constants`**: Centralized constants for key codes, modifier masks, timing intervals, UserDefaults keys, and minimum word replacement length (`Constants.WordSub.minAutoReplaceLength`)
