@@ -29,4 +29,6 @@ Take the first option that fully works:
 
 Never cut: validation at trust boundaries, error handling that prevents data loss, security, accessibility, the calibration real hardware needs, anything the user asked for.
 
-(Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)
+## Commits
+
+One short line like the rest of `git log --oneline`: `type: lowercase summary` (`feat`, `fix`, `docs`, `refactor`). No body, bullets or history of how the change came about.

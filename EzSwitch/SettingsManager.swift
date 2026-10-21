@@ -249,11 +249,9 @@ final class SettingsManager: ObservableObject {
     }
 
     private func refreshKeyboardMonitoring() {
-        // Word sub needs to be able to suppress the hotkey key (e.g. ⌘⇧M) in the
-        // target app, so the tap must always run in defaultTap mode when word sub
-        // is on — even if the transform key isn't being suppressed.
+        // Terminal corrections defer input until deletion and paste have finished.
         let shouldMonitor = !isPaused && (commandSwitchEnabled || enableTransformKey || enableWordSubstitution)
-        let needsSuppression = (enableTransformKey && suppressTransformKey) || enableWordSubstitution
+        let needsSuppression = enableTransformKey || enableWordSubstitution
 
         if shouldMonitor {
             KeyboardManager.shared.startMonitoring(suppressEvents: needsSuppression)

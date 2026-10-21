@@ -40,7 +40,10 @@ final class KeyboardManager {
     private var rightShiftDown = false
 
     // Word-level substitution buffer
-    private var wordBuffer: String = ""
+    private var wordBuffer = TypedWordBuffer()
+    private var terminalReplacementPID: pid_t?
+    private var terminalFocusedElement: AXUIElement?
+    private var deferredTerminalEvents: [(event: CGEvent, scalar: Unicode.Scalar?)] = []
     /// While replacement is in progress, pass events through without updating
     /// wordBuffer or modifier tracking. This also applies to real user input.
     private var isReplacingWord = false
@@ -48,7 +51,7 @@ final class KeyboardManager {
     /// round-trip, paste). These block for tens of milliseconds with `usleep`
     /// and must not run on the main thread: the event tap lives on the main
     /// run loop, so blocking main delays delivery of every real keystroke.
-    private let workQueue = DispatchQueue(label: "ezswitch.keyboard.work", qos: .userInteractive)
+    private let workQueue = CGEventSynthesizer.workQueue
     /// Last observed or requested layout, as a stable input source ID.
     /// Reads from TIS refresh this cached value after system layout changes.
     public private(set) var currentLayoutID: String = ""
@@ -86,7 +89,7 @@ final class KeyboardManager {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.wordBuffer.removeAll()
+            self?.wordBuffer.reset()
             _ = self?.currentInputSourceID()
         }
     }
@@ -103,9 +106,13 @@ final class KeyboardManager {
 
         _suppressEvents = suppressEvents
 
-        let mask = (1 << CGEventType.keyDown.rawValue) |
-                   (1 << CGEventType.keyUp.rawValue) |
-                   (1 << CGEventType.flagsChanged.rawValue)
+        let eventTypes: [CGEventType] = [
+            .keyDown, .keyUp, .flagsChanged,
+            .leftMouseDown, .rightMouseDown, .otherMouseDown,
+            .leftMouseUp, .rightMouseUp, .otherMouseUp,
+            .leftMouseDragged, .rightMouseDragged, .otherMouseDragged
+        ]
+        let mask = eventTypes.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
 
         // For event suppression use .defaultTap, otherwise .listenOnly
         let tapOptions: CGEventTapOptions = suppressEvents ? .defaultTap : .listenOnly
@@ -117,6 +124,7 @@ final class KeyboardManager {
             eventsOfInterest: CGEventMask(mask),
             callback: { (_, type, event, _) -> Unmanaged<CGEvent>? in
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    KeyboardManager.shared.wordBuffer.reset()
                     if let tap = KeyboardManager.shared.eventTap {
                         CGEvent.tapEnable(tap: tap, enable: true)
                         Log.permissions.error("Event tap was disabled by the system (\(String(describing: type), privacy: .public)) and re-enabled — keys were dropped while it was off")
@@ -152,7 +160,7 @@ final class KeyboardManager {
         transformKeyCancelled = false
         leftShiftDown = false
         rightShiftDown = false
-        wordBuffer.removeAll()
+        wordBuffer.reset()
         guard let tap = eventTap else { return }
 
         CGEvent.tapEnable(tap: tap, enable: false)
@@ -179,7 +187,21 @@ final class KeyboardManager {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
     }
 
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handle(type: CGEventType, event: CGEvent, capturedScalar: Unicode.Scalar? = nil) -> Unmanaged<CGEvent>? {
+        // Keep real input ordered after the terminal's delete/paste transaction.
+        if terminalReplacementPID != nil {
+            if let copy = event.copy() {
+                let scalar = capturedScalar ?? (type == .keyDown ? unicodeScalar(
+                    forKeyCode: Int(event.getIntegerValueField(.keyboardEventKeycode)), flags: event.flags, event: event
+                ) : nil)
+                deferredTerminalEvents.append((copy, scalar))
+            }
+            return nil
+        }
+        if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
+            wordBuffer.reset()
+            return Unmanaged.passUnretained(event)
+        }
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags
         let now = CFAbsoluteTimeGetCurrent()
@@ -198,11 +220,13 @@ final class KeyboardManager {
 
             // Word-level substitution: append printable chars / commit on separator.
             // Skipped entirely while our own UI is frontmost (see isFrontmostAppSelf).
-            if SettingsManager.shared.enableWordSubstitution, !isFrontmostAppSelf {
+            let settings = SettingsManager.shared
+            let isTerminal = AppConfigRegistry.isTerminal(bundleID: AppConfigRegistry.frontmostAppBundleId())
+            if (settings.enableWordSubstitution || (settings.enableTransformKey && isTerminal)), !isFrontmostAppSelf {
                 // Configurable hotkey: remember the current word. Suppress the key
                 // so it doesn't appear in the target text field.
                 let hotkey = SettingsManager.shared.wordRememberHotkey
-                if hotkey.isSet,
+                if settings.enableWordSubstitution, hotkey.isSet,
                    keyCode == Int(hotkey.keyCode),
                    hotkey.matches(flags: flags) {
                     rememberCurrentWord()
@@ -211,15 +235,15 @@ final class KeyboardManager {
 
                 // Backspace: pop last character from buffer
                 if keyCode == deleteKeyCode {
-                    if !wordBuffer.isEmpty {
-                        wordBuffer.removeLast()
-                    }
+                    if flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty {
+                        wordBuffer.backspace()
+                    } else { wordBuffer.reset() }
                     return Unmanaged.passUnretained(event)
                 }
 
                 // Navigation and Escape keys clear the word buffer.
                 if isBufferResetKey(keyCode) {
-                    wordBuffer.removeAll()
+                    wordBuffer.reset()
                     return Unmanaged.passUnretained(event)
                 }
 
@@ -227,19 +251,19 @@ final class KeyboardManager {
                 // shortcuts like ⌘C or ⌘Z reset the buffer.
                 let nonTextModifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate]
                 if flags.intersection(nonTextModifiers).isEmpty {
-                    if let scalar = unicodeScalar(forKeyCode: keyCode, flags: flags, event: event) {
-                        if isWordSeparator(scalar) {
-                            if tryCommitWordBuffer(separator: String(scalar)) {
+                    if let scalar = capturedScalar ?? unicodeScalar(forKeyCode: keyCode, flags: flags, event: event) {
+                        if TypedWordBuffer.isSeparator(scalar) {
+                            if settings.enableWordSubstitution,
+                               tryCommitWordBuffer(separator: String(scalar), event: event) {
                                 // Separator event is suppressed; replacement + separator
                                 // will be pasted asynchronously.
                                 return nil
                             }
-                        } else {
-                            wordBuffer.append(Character(scalar))
                         }
+                        wordBuffer.append(scalar)
                     }
                 } else {
-                    wordBuffer.removeAll()
+                    wordBuffer.reset()
                 }
             }
             return Unmanaged.passUnretained(event)
@@ -270,7 +294,7 @@ final class KeyboardManager {
             // 4) Transform key logic (Shift or Option)
             if SettingsManager.shared.enableTransformKey {
                 let result = handleTransformKey(keyCode: keyCode, flags: flags, now: now)
-                if result.shouldSuppress && _suppressEvents {
+                if result.shouldSuppress && SettingsManager.shared.suppressTransformKey && _suppressEvents {
                     return nil // Suppress event
                 }
             }
@@ -369,8 +393,13 @@ final class KeyboardManager {
                 let skipLayoutSwitch = otherShiftHeld
                 Log.transform.debug("Double \(keyType.shortName, privacy: .public) detected (skipLayout=\(skipLayoutSwitch ? "yes" : "no", privacy: .public), left=\(self.leftShiftDown ? "down" : "up", privacy: .public), right=\(self.rightShiftDown ? "down" : "up", privacy: .public))")
 
-                DispatchQueue.main.async {
-                    TextTransformer.shared.transformSelectedText(skipLayoutSwitch: skipLayoutSwitch)
+                if AppConfigRegistry.isTerminal(bundleID: AppConfigRegistry.frontmostAppBundleId()) {
+                    // Lock the observed text before the next input event can change it.
+                    transformTerminalWord(skipLayoutSwitch: skipLayoutSwitch)
+                } else {
+                    DispatchQueue.main.async {
+                        TextTransformer.shared.transformSelectedText(skipLayoutSwitch: skipLayoutSwitch)
+                    }
                 }
 
                 return (true, true) // Suppress second tap
@@ -442,20 +471,6 @@ final class KeyboardManager {
         }
     }
 
-    /// Characters that end a word buffer.
-    private func isWordSeparator(_ scalar: Unicode.Scalar) -> Bool {
-        // Whitespace + common sentence punctuation
-        switch scalar {
-        case " ", "\n", "\t", "\r",
-             ".", ",", ";", ":", "!", "?", "\"" , "'",
-             "(", ")", "[", "]", "{", "}",
-             "<", ">", "/", "\\", "|", "-", "_", "=", "+":
-            return true
-        default:
-            return false
-        }
-    }
-
     /// Translate a key code + modifier flags into a Unicode scalar using
     /// the current keyboard layout via UCKeyTranslate (with proper UCTModifier
     /// bitmasks) and falling back to the CGEvent's native Unicode string.
@@ -464,6 +479,7 @@ final class KeyboardManager {
         var mods: UInt32 = Constants.UCTModifier.none
         if flags.contains(.maskShift)     { mods |= Constants.UCTModifier.shift }
         if flags.contains(.maskAlternate) { mods |= Constants.UCTModifier.option }
+        if flags.contains(.maskAlphaShift) { mods |= UInt32(alphaLock >> 8) }
 
         let inputSource = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue()
             ?? TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
@@ -515,9 +531,8 @@ final class KeyboardManager {
 
     /// End-of-word: try to find a match and auto-replace.
     /// Returns `true` if a substitution was found and scheduled (caller should suppress separator event).
-    private func tryCommitWordBuffer(separator: String) -> Bool {
-        let word = wordBuffer
-        wordBuffer = ""
+    private func tryCommitWordBuffer(separator: String, event: CGEvent) -> Bool {
+        let word = wordBuffer.currentWord
         guard word.count >= Constants.WordSub.minAutoReplaceLength,
               word.contains(where: { $0.isLetter }) else { return false }
         guard let pair = currentActivePair() else { return false }
@@ -526,6 +541,17 @@ final class KeyboardManager {
         let wordLength = word.count
         let replacement = result.replacement
         let targetLayout = result.targetLayout
+
+        if AppConfigRegistry.isTerminal(bundleID: AppConfigRegistry.frontmostAppBundleId()) {
+            guard TerminalInput.isSafeReplacement(replacement),
+                  let separatorEvent = event.copy(), beginTerminalReplacement() else { return false }
+            wordBuffer.reset()
+            let replay = TerminalInput.replaysSeparator(separator)
+            replaceTerminalWord(original: word, replacement: replacement + (replay ? "" : separator),
+                                separatorEvent: replay ? separatorEvent : nil, targetLayout: targetLayout)
+            return true
+        }
+        wordBuffer.reset()
 
         Log.words.debug("Auto-replacing \"\(word, privacy: .public)\" → \"\(replacement, privacy: .public)\" (targetLayout=\(targetLayout ?? "none", privacy: .public))")
 
@@ -563,9 +589,17 @@ final class KeyboardManager {
     /// round-trip through the pasteboard). In both cases the typed or
     /// selected word is also replaced in place and switches to the target layout.
     private func rememberCurrentWord() {
-        let word = wordBuffer
+        let word = wordBuffer.currentWord
         if !word.isEmpty {
-            wordBuffer = ""
+            if AppConfigRegistry.isTerminal(bundleID: AppConfigRegistry.frontmostAppBundleId()) {
+                guard let pair = currentActivePair() else { return }
+                let other = applyCharacterMapping(word, from: pair.from, to: pair.to)
+                guard other != word, TerminalInput.isSafeReplacement(other), beginTerminalReplacement() else { return }
+                saveWordAsMapping(word, pair: pair)
+                replaceTerminalWord(original: word, replacement: other, targetLayout: pair.to)
+                return
+            }
+            wordBuffer.reset()
             if let pair = currentActivePair() {
                 saveWordAsMapping(word, pair: pair)
                 let other = applyCharacterMapping(word, from: pair.from, to: pair.to)
@@ -591,6 +625,7 @@ final class KeyboardManager {
             }
             return
         }
+        guard !AppConfigRegistry.isTerminal(bundleID: AppConfigRegistry.frontmostAppBundleId()) else { return }
         // No buffer — try to capture the user's selected text.
         captureSelectedText { [weak self] captured in
             guard let self = self else { return }
@@ -675,6 +710,121 @@ final class KeyboardManager {
     func currentLayoutName() -> String? {
         guard let id = currentInputSourceID() else { return nil }
         return LayoutRegistry.displayName(forID: id)
+    }
+
+    // MARK: - Terminal input
+
+    private func focusedElement(pid: pid_t) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid),
+                                           kAXFocusedUIElementAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    private func beginTerminalReplacement() -> Bool {
+        guard terminalReplacementPID == nil, !isReplacingWord,
+              AXIsProcessTrusted(), !IsSecureEventInputEnabled(),
+              let app = NSWorkspace.shared.frontmostApplication,
+              AppConfigRegistry.isTerminal(bundleID: app.bundleIdentifier) else { return false }
+        terminalFocusedElement = focusedElement(pid: app.processIdentifier)
+        terminalReplacementPID = app.processIdentifier
+        isReplacingWord = true
+        return true
+    }
+
+    private func terminalTargetIsCurrent() -> Bool {
+        guard let pid = terminalReplacementPID, !IsSecureEventInputEnabled(),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+        if let original = terminalFocusedElement {
+            guard let current = focusedElement(pid: pid), CFEqual(original, current) else { return false }
+        }
+        return true
+    }
+
+    private func finishTerminalReplacement(text: String? = nil, targetLayout: String? = nil) {
+        let stillCurrent = terminalTargetIsCurrent()
+        if stillCurrent, let targetLayout { switchToLayout(id: targetLayout) }
+        wordBuffer.reset()
+        if stillCurrent, let text { wordBuffer.replace(with: text) }
+        let events = deferredTerminalEvents
+        deferredTerminalEvents.removeAll()
+        terminalReplacementPID = nil
+        terminalFocusedElement = nil
+        isReplacingWord = false
+        leftCmd = KeyState()
+        rightCmd = KeyState()
+        transformKeyDown = false
+        leftShiftDown = false
+        rightShiftDown = false
+        for (event, scalar) in events {
+            if !stillCurrent || handle(type: event.type, event: event, capturedScalar: scalar) != nil {
+                event.post(tap: .cgAnnotatedSessionEventTap)
+            }
+        }
+    }
+
+    private func transformTerminalWord(skipLayoutSwitch: Bool) {
+        let original = wordBuffer.text
+        guard !original.isEmpty else {
+            Log.transform.debug("Terminal transform skipped: no tracked text at the cursor")
+            return
+        }
+        guard beginTerminalReplacement() else {
+            Log.transform.debug("Terminal transform skipped: input is busy, untrusted, or secure")
+            return
+        }
+        Log.transform.debug("Terminal transform requested (characters=\(original.count, privacy: .public))")
+        let shouldSwitch = !skipLayoutSwitch && SettingsManager.shared.switchLayoutAfterTransform
+        TextTransformer.shared.planTypedText(original) { plan in
+            guard plan.transformedText != original, TerminalInput.isSafeReplacement(plan.transformedText),
+                  self.terminalTargetIsCurrent() else {
+                self.finishTerminalReplacement(text: original)
+                Log.transform.debug("Terminal transform skipped: unchanged text, unsafe mapping, or changed focus")
+                return
+            }
+            self.replaceTerminalWord(original: original, replacement: plan.transformedText,
+                                     targetLayout: shouldSwitch ? plan.targetLayout : nil)
+        }
+    }
+
+    /// Caller has already captured and locked the terminal input on main.
+    private func replaceTerminalWord(original: String, replacement: String,
+                                     separatorEvent: CGEvent? = nil, targetLayout: String? = nil) {
+        guard let pid = terminalReplacementPID else { return }
+        workQueue.async {
+            let clipboard = ClipboardManager.shared
+            let saved = clipboard.saveState()
+            clipboard.setString(replacement)
+            let pasteCount = NSPasteboard.general.changeCount
+            var didPaste = false
+            defer {
+                if NSPasteboard.general.changeCount == pasteCount { clipboard.restoreState(saved) }
+                DispatchQueue.main.async {
+                    self.finishTerminalReplacement(text: didPaste && separatorEvent == nil ? replacement : nil,
+                                                   targetLayout: didPaste ? targetLayout : nil)
+                }
+            }
+
+            // Let the trigger modifiers settle before posting a plain paste.
+            Thread.sleep(forTimeInterval: Constants.Timing.pasteCmdVDeferSec)
+            guard NSPasteboard.general.string(forType: .string) == replacement else { return }
+            for _ in original {
+                guard DispatchQueue.main.sync(execute: { self.terminalTargetIsCurrent() }) else { return }
+                CGEventSynthesizer.press(UInt16(self.deleteKeyCode), targetPID: pid)
+                usleep(Constants.Timing.backspaceDelayUs)
+            }
+            guard DispatchQueue.main.sync(execute: { self.terminalTargetIsCurrent() }) else { return }
+            CGEventSynthesizer.press(UInt16(Constants.KeyCode.v), flags: .maskCommand, targetPID: pid)
+            // shortcut: terminals do not acknowledge clipboard consumption, recheck this delay for new hosts.
+            Thread.sleep(forTimeInterval: Constants.Timing.pasteRestoreDelaySec)
+            didPaste = true
+            if let separatorEvent,
+               DispatchQueue.main.sync(execute: { self.terminalTargetIsCurrent() }) {
+                // A pasted newline/tab is not Enter/completion under bracketed paste.
+                separatorEvent.postToPid(pid)
+            }
+        }
     }
 
     /// Erase `originalLength` chars (since the separator key event was already

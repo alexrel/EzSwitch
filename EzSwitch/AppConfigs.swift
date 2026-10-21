@@ -137,7 +137,7 @@ final class AppConfigRegistry {
             bundleId: "com.googlecode.iterm2",
             displayName: "iTerm2",
             method: .optionShiftLeft,
-            notes: "Terminal, Option works"
+            notes: "Terminal input uses the typed-word buffer instead of selection shortcuts"
         ),
 
         // MARK: - macOS standard applications (Option+Shift+Left)
@@ -299,5 +299,12 @@ final class AppConfigRegistry {
     /// Get Bundle ID of the currently active application
     static func frontmostAppBundleId() -> String? {
         return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
+    static func isTerminal(bundleID: String?) -> Bool {
+        switch bundleID?.lowercased() {
+        case "com.apple.terminal", "com.googlecode.iterm2": return true
+        default: return false
+        }
     }
 }

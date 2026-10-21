@@ -33,7 +33,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "slider.horizontal.3"
-        case .switching: return "command"
+        case .switching: return SettingsManager.shared.switchModifier.isCommand ? "command" : "option"
         case .transformation: return "textformat.abc"
         case .characters: return "keyboard"
         case .words: return "text.book.closed"

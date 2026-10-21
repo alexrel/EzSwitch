@@ -18,18 +18,32 @@ class StatusBarController: NSObject {
         // Height is the *minimum* preferred size; SwiftUI can grow it with fixedSize
         popover.contentSize = NSSize(width: 360, height: 360)
         popover.behavior = .transient
-        // Let the same SwiftUI background fill the native arrow region.
-        // Foreground controls remain inside the popover's safe area.
+        // The AppKit background fills the arrow; controls stay in the safe area.
         popover.hasFullSizeContent = true
         
         super.init()
 
-        popover.contentViewController = NSHostingController(rootView: LocalizedContent {
+        let hosting = NSHostingController(rootView: LocalizedContent {
             QuickControlsView { [weak self] section, usePair in
                 self?.popover.performClose(nil)
                 SettingsWindowController.shared.showWindow(section: section, usingSwitchPair: usePair)
             }
         })
+        hosting.sizingOptions = [.preferredContentSize]
+        let content = PopoverContentViewController()
+        content.view = PopoverBackgroundView()
+        content.addChild(hosting)
+        content.view.addSubview(hosting.view)
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        let safeArea = content.view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor)
+        ])
+        content.preferredContentSize = hosting.view.fittingSize
+        popover.contentViewController = content
         
         // Configure status bar
         setupStatusBar()
@@ -44,7 +58,10 @@ class StatusBarController: NSObject {
             .store(in: &observations)
         AppLocalization.shared.$languageCode
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.updateTooltip() }
+            .sink { [weak self] _ in
+                self?.updateTooltip()
+                self?.popover.contentViewController?.view.needsDisplay = true
+            }
             .store(in: &observations)
     }
     
@@ -130,5 +147,12 @@ class StatusBarController: NSObject {
             // Activate application
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+}
+
+private final class PopoverContentViewController: NSViewController {
+    override func preferredContentSizeDidChange(for viewController: NSViewController) {
+        super.preferredContentSizeDidChange(for: viewController)
+        preferredContentSize = viewController.preferredContentSize
     }
 }

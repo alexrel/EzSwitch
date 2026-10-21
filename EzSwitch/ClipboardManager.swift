@@ -50,8 +50,9 @@ final class ClipboardManager {
     }
 
     /// Restore full clipboard state
-    func restoreState(_ state: ClipboardState) {
+    func restoreState(_ state: ClipboardState, ifUnchangedSince changeCount: Int? = nil) {
         let pb = NSPasteboard.general
+        if let changeCount, pb.changeCount != changeCount { return }
 
         guard !state.isEmpty else {
             // Buffer was empty — clear it

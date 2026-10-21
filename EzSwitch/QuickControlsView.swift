@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Session controls with the same icon and section treatment as the original panel.
 struct QuickControlsView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var localization = AppLocalization.shared
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var permissions = PermissionsManager.shared
@@ -64,7 +63,7 @@ struct QuickControlsView: View {
                 featureRow(
                     String(appLocalized: "Layout Switch"),
                     detail: "\(LayoutRegistry.displayName(forID: settings.leftCommandLayout)) ↔ \(LayoutRegistry.displayName(forID: settings.rightCommandLayout))",
-                    icon: "command", color: .blue, enabled: $settings.commandSwitchEnabled
+                    icon: settings.switchModifier.isCommand ? "command" : "option", color: .blue, enabled: $settings.commandSwitchEnabled
                 )
                 featureRow(
                     String(appLocalized: "Text Transformation"),
@@ -98,20 +97,9 @@ struct QuickControlsView: View {
         .controlSize(.regular)
         .padding(16)
         .frame(width: 360)
-        .background(backgroundGradient.ignoresSafeArea())
         .fixedSize(horizontal: false, vertical: true)
         .onAppear { permissions.refresh() }
         .onReceive(timer) { _ in permissions.refresh() }
-    }
-
-    private var backgroundGradient: LinearGradient {
-        LinearGradient(
-            colors: colorScheme == .dark
-                ? [Color(red: 0.16, green: 0.18, blue: 0.23), Color(red: 0.12, green: 0.13, blue: 0.17)]
-                : [Color(red: 0.93, green: 0.95, blue: 1.0), Color(red: 0.96, green: 0.97, blue: 0.99)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
     }
 
     private func featureRow(_ title: String, detail: String, icon: String, color: Color, enabled: Binding<Bool>) -> some View {

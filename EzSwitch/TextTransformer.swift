@@ -21,7 +21,7 @@ final class TextTransformer {
     /// polling for the clipboard) and must never run on the main thread:
     /// the event tap lives on the main run loop, so blocking main delays
     /// delivery of every real keystroke the user types meanwhile.
-    private let workQueue = DispatchQueue(label: "ezswitch.transform.work", qos: .userInteractive)
+    private let workQueue = CGEventSynthesizer.workQueue
 
     /// Main entry point: tries Branch A (selection), falls back to Branch B (last word)
     ///
@@ -49,6 +49,24 @@ final class TextTransformer {
                                previousLayout: previousLayout,
                                snapshot: snapshot,
                                skipLayoutSwitch: skipLayoutSwitch)
+        }
+    }
+
+    /// Terminal input is already known; reuse the same rules and cycling without Cmd+C.
+    func planTypedText(_ text: String, completion: @escaping (TransformPlan) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let km = KeyboardManager.shared
+        let current = km.currentInputSourceID() ?? km.currentLayoutID
+        let previous = km.previousLayoutID
+        let settings = SettingsManager.shared
+        let snapshot = TransformSnapshot(
+            presets: MapperStore.shared.snapshot(), selectedPresetIDs: settings.selectedPresetIds,
+            primaryLanguages: [settings.leftCommandLayout, settings.rightCommandLayout],
+            switchLayoutAfterTransform: settings.switchLayoutAfterTransform
+        )
+        workQueue.async {
+            let plan = self.planTransform(for: text, currentLayout: current, previousLayout: previous, snapshot: snapshot)
+            DispatchQueue.main.async { completion(plan) }
         }
     }
 
@@ -116,6 +134,7 @@ final class TextTransformer {
 
         // Put transformed text to clipboard and paste (single Undo action)
         ClipboardManager.shared.setString(transformed)
+        let pasteCount = NSPasteboard.general.changeCount
         usleep(keySequenceDelayUs)
 
         // Paste replaces selection automatically
@@ -136,7 +155,7 @@ final class TextTransformer {
 
         // Restore clipboard (full state including images, files, etc.)
         DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            ClipboardManager.shared.restoreState(savedState)
+            ClipboardManager.shared.restoreState(savedState, ifUnchangedSince: pasteCount)
         }
     }
 
@@ -188,6 +207,7 @@ final class TextTransformer {
 
         // Put to clipboard and paste (single Undo)
         ClipboardManager.shared.setString(replacement)
+        let pasteCount = NSPasteboard.general.changeCount
         usleep(keySequenceDelayUs)
 
         simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
@@ -206,7 +226,7 @@ final class TextTransformer {
 
         // Restore clipboard (full state including images, files, etc.)
         DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            ClipboardManager.shared.restoreState(savedState)
+            ClipboardManager.shared.restoreState(savedState, ifUnchangedSince: pasteCount)
         }
     }
 

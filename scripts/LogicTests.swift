@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 // Standalone harness for mapping, matching, hotkey, and picker logic.
 // The app has no XCTest target; run the wrapper to compile these sources
@@ -282,6 +283,11 @@ func testMapperPairOptions() {
 // MARK: - Run
 
 func testLiveLayoutNames() {
+    func expectedName(for id: String, translated: String) -> String {
+        if #available(macOS 15.4, *) { return translated }
+        guard let source = LayoutRegistry.source(forID: id) else { return id }
+        return KeyboardLayoutUtility.localizedName(of: source) ?? id
+    }
     let localization = AppLocalization.shared
     let original = localization.language
     defer { localization.apply(original) }
@@ -290,7 +296,8 @@ func testLiveLayoutNames() {
     let russian = "com.apple.keylayout.RussianWin"
     let expectedHebrew: [(AppLanguage, String)] = [(.he, "עברית"), (.ru, "Иврит"), (.uk, "Іврит"), (.en, "Hebrew"), (.he, "עברית")]
     let originalIDs = Set(LayoutRegistry.available().map(\.id))
-    for (language, expected) in expectedHebrew {
+    for (language, translated) in expectedHebrew {
+        let expected = expectedName(for: hebrew, translated: translated)
         localization.apply(language)
         let layouts = LayoutRegistry.available()
         equal(Set(layouts.map(\.id)), originalIDs, "changing language preserves available layout IDs")
@@ -303,7 +310,7 @@ func testLiveLayoutNames() {
     }
     localization.apply(.ru)
     equal(LayoutPair.normalized(LayoutRegistry.displayName(forID: russian)),
-          LayoutPair.normalized("Русская — ПК"), "Russian PC retains its variant in the localized name")
+          LayoutPair.normalized(expectedName(for: russian, translated: "Русская — ПК")), "Russian PC retains its variant in the displayed name")
     equal(LayoutRegistry.displayName(forID: "com.example.removed-layout"), "com.example.removed-layout", "unknown layouts retain their stored identity")
     equal(LayoutRegistry.displayName(forID: Constants.Default.noneLanguage), Constants.Default.noneLanguage, "the unset layout is unchanged")
 }
@@ -552,6 +559,114 @@ func testLiveLocalization() {
     equal(AppLocalization.resolve(.en, systemLanguages: ["he-IL"]), "en", "explicit choice ignores system preferences")
 }
 
+func testPopoverBackground() {
+    for (appearance, expected) in [(NSAppearance.Name.aqua, [0.93, 0.95, 1.0]),
+                                   (.darkAqua, [0.16, 0.18, 0.23])] {
+        let view = PopoverBackgroundView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        view.appearance = NSAppearance(named: appearance)
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 100, pixelsHigh: 100,
+                                           bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                           isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            check(false, "popover background bitmap can be created")
+            continue
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        view.draw(view.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+        let x = AppLocalization.shared.isRightToLeft ? 99 : 0
+        guard let top = bitmap.colorAt(x: x, y: 0)?.usingColorSpace(.sRGB),
+              let below = bitmap.colorAt(x: x, y: 12)?.usingColorSpace(.sRGB) else {
+            check(false, "popover background pixels can be read")
+            continue
+        }
+        check(abs(top.redComponent - expected[0]) < 0.02 && abs(top.greenComponent - expected[1]) < 0.02
+              && abs(top.blueComponent - expected[2]) < 0.02, "native background uses the existing theme colors")
+        equal(top.alphaComponent, 1, "native background fills the arrow region opaquely")
+        check(abs(top.redComponent - below.redComponent) < 0.02, "arrow and body share a continuous gradient")
+    }
+}
+
+func testTerminalInput() {
+    var buffer = TypedWordBuffer()
+    for scalar in "ghbdtn".unicodeScalars { buffer.append(scalar) }
+    equal(buffer.text, "ghbdtn", "manual correction has a word without dictionary matching")
+    buffer.append(" ")
+    buffer.append(" ")
+    equal(buffer.text, "ghbdtn  ", "last word retains trailing spaces for explicit correction")
+    equal(buffer.currentWord, "", "extra spaces do not repeat automatic substitution")
+    buffer.backspace()
+    equal(buffer.text, "ghbdtn ", "backspace first removes the trailing space")
+    buffer.append("п")
+    buffer.append("ш")
+    buffer.append("е")
+    equal(buffer.currentWord, "пше", "a new word excludes the previous word and spaces")
+    equal(WordMatcher.findMatch(word: buffer.currentWord, in: ["пше": "git"])?.replacement,
+          "git", "buffered terminal input uses the existing dictionary matcher")
+    buffer.backspace()
+    equal(buffer.text, "пш", "backspace removes one Cyrillic character")
+    buffer.reset()
+    equal(buffer.text, "", "cursor or focus changes forget the old word")
+    buffer.replace(with: "שלום")
+    equal(buffer.text, "שלום", "a replacement can be corrected again")
+    buffer.append("\t")
+    equal(buffer.text, "", "completion invalidates the known text")
+    buffer.replace(with: "git")
+    buffer.append("\r")
+    equal(buffer.text, "", "submission invalidates the known text")
+    for token in ["cfvb[", ";er", "ghbdtn,", "[", "<"] {
+        buffer.replace(with: token)
+        equal(buffer.text, token, "manual correction retains punctuation that can map to letters")
+        buffer.append(" ")
+        equal(buffer.text, token + " ", "manual correction retains punctuation before trailing spaces")
+        buffer.backspace()
+        equal(buffer.text, token, "backspace restores the complete punctuation-containing token")
+    }
+    buffer.replace(with: "one,two")
+    equal(buffer.currentWord, "two", "dictionary matching still starts after punctuation")
+    buffer.backspace()
+    equal(buffer.currentWord, "tw", "backspace updates the dictionary word after punctuation")
+    buffer.replace(with: "word,")
+    equal(buffer.currentWord, "", "punctuation does not retrigger dictionary matching")
+    buffer.backspace()
+    equal(buffer.currentWord, "word", "backspacing punctuation restores the dictionary word")
+    buffer.append(" ")
+    buffer.append("x")
+    equal(buffer.text, "x", "a new token does not erase the previous token during correction")
+    var preset = makePreset()
+    preset.mapping["х"] = "["
+    buffer.replace(with: "b[  ")
+    let corrected = preset.apply(buffer.text, from: "ABC")
+    equal(corrected, "их  ", "terminal correction maps the complete token and preserves spaces")
+    buffer.replace(with: corrected)
+    equal(preset.apply(buffer.text, from: "Russian – PC"), "b[  ", "repeated correction can restore punctuation")
+    preset.mapping["у"] = "e"
+    preset.mapping["д"] = "l"
+    preset.mapping["щ"] = "o"
+    buffer.replace(with: "руддщ")
+    equal(preset.apply(buffer.text, from: "Russian – PC"), "hello", "reported iTerm input converts without dictionary matching")
+    for separator in " .,/;:\t\n\r".unicodeScalars {
+        check(TypedWordBuffer.isSeparator(separator), "existing auto-replacement separators remain supported")
+    }
+    check(AppConfigRegistry.isTerminal(bundleID: "com.apple.Terminal"), "recognizes Terminal case-insensitively")
+    check(AppConfigRegistry.isTerminal(bundleID: "com.googlecode.iterm2"), "recognizes iTerm")
+    check(!AppConfigRegistry.isTerminal(bundleID: "com.microsoft.VSCode"), "editor text fields keep their existing correction path")
+    check(!AppConfigRegistry.isTerminal(bundleID: nil), "unknown apps do not use terminal deletion")
+    check(TerminalInput.isSafeReplacement("привет שלום git --help"), "ordinary Unicode and spaces may be pasted")
+    for separator in ["\n", "\r", "\t"] {
+        check(TerminalInput.replaysSeparator(separator), "Enter and Tab retain their terminal actions")
+    }
+    for separator in [" ", ".", "/", "|", ";"] {
+        check(!TerminalInput.replaysSeparator(separator), "punctuation is pasted as typed even if the layout changes")
+    }
+    for unsafe in ["", "git\n", "git\r", "git\t", "git\u{1B}[A", "git\u{7F}", "git\u{2028}"] {
+        check(!TerminalInput.isSafeReplacement(unsafe), "mapping cannot introduce terminal control input")
+    }
+}
+
+testPopoverBackground()
+testTerminalInput()
 testAppLanguagePreference()
 testPresetFileSafety()
 testTransformSnapshot()

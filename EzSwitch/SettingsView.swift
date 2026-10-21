@@ -269,7 +269,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
             HStack(spacing: 18) {
                 if let icon = NSImage(named: "AppIcon") {
-                    Image(nsImage: icon).resizable().frame(width: 72, height: 72)
+                    Image(nsImage: icon).resizable().frame(width: 96, height: 96)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(verbatim: "EzSwitch").font(.system(size: 22, weight: .semibold))
@@ -293,9 +293,7 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
     }
     private var appBuild: String {
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        if let hash = Bundle.main.infoDictionary?["GitCommitHash"] as? String { return "\(build) · \(hash)" }
-        return build
+        Bundle.main.infoDictionary?["GitCommitHash"] as? String ?? "dev"
     }
     private var pairTitle: String {
         "\(LayoutRegistry.displayName(forID: settings.leftCommandLayout)) ↔ \(LayoutRegistry.displayName(forID: settings.rightCommandLayout))"

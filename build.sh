@@ -38,7 +38,7 @@ BUNDLE_ID="${BUNDLE_ID:-alexrel.EzSwitch}"
 # xcodebuild, so it must be told the same minimum or it would emit a binary
 # accepting an older macOS than the Xcode build does.
 MACOS_MIN=$(grep -m1 'MACOSX_DEPLOYMENT_TARGET' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*MACOSX_DEPLOYMENT_TARGET = //;s/;//')
-MACOS_MIN="${MACOS_MIN:-15.4}"
+MACOS_MIN="${MACOS_MIN:-14.0}"
 
 # Automatically compute build number & git commit hash from git
 BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo "1")
@@ -49,7 +49,7 @@ DERIVED_DATA="DerivedData"
 ARCHIVE_PATH="$BUILD_DIR/$APP_NAME.xcarchive"
 EXPORT_DIR="$BUILD_DIR/Release"
 EXPORT_OPTIONS="$BUILD_DIR/ExportOptions.plist"
-DMG_PATH="$BUILD_DIR/${APP_NAME}-Installer-v${VERSION}.dmg"
+DMG_PATH="$BUILD_DIR/${APP_NAME}.dmg"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -145,6 +145,7 @@ build_app() {
         "${XCODE_ARGS[@]}" \
         -scheme "$SCHEME" \
         -configuration Release \
+        -destination "generic/platform=macOS" \
         -derivedDataPath "$DERIVED_DATA" \
         MARKETING_VERSION="$VERSION" \
         CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
@@ -170,8 +171,6 @@ build_app() {
                 "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
             /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" \
                 "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
-            /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN" \
-                "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
         fi
         cp -R "EzSwitch/en.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
         cp -R "EzSwitch/ru.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
@@ -193,6 +192,7 @@ build_app() {
     # Inject version metadata into the app bundle Info.plist before signing
     local app_plist="$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
     if [ -f "$app_plist" ]; then
+        /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN" "$app_plist"
         log "${YELLOW}🏷  Version metadata: v$VERSION (build $BUILD_NUMBER · $GIT_HASH)${NC}"
         /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$app_plist" 2>/dev/null || \
         /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$app_plist" 2>/dev/null || true
@@ -277,8 +277,8 @@ build_dmg() {
         rm -rf "$BUILD_DIR/Portable/$APP_NAME.app"
         cp -R "$staging/$APP_NAME.app" "$BUILD_DIR/Portable/$APP_NAME.app"
     fi
-    rm -f "$BUILD_DIR/${APP_NAME}-Portable.zip"
-    ditto -c -k --sequesterRsrc --keepParent "$BUILD_DIR/Portable/$APP_NAME.app" "$BUILD_DIR/${APP_NAME}-Portable.zip"
+    rm -f "$BUILD_DIR/${APP_NAME}.zip"
+    ditto -c -k --sequesterRsrc --keepParent "$BUILD_DIR/Portable/$APP_NAME.app" "$BUILD_DIR/${APP_NAME}.zip"
 
     ln -s /Applications "$staging/Applications"
 

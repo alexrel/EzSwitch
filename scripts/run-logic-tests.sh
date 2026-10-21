@@ -27,11 +27,14 @@ done
 swiftc -O \
     -module-cache-path "$TESTS_DIR/module-cache" \
     EzSwitch/AppLanguage.swift \
+    EzSwitch/AppConfigs.swift \
     EzSwitch/AppLocalization.swift \
+    EzSwitch/PopoverBackgroundView.swift \
     EzSwitch/Constants.swift \
     EzSwitch/LayoutRegistry.swift \
     EzSwitch/TransformSourceDetection.swift \
     EzSwitch/TransformSnapshot.swift \
+    EzSwitch/TypedWordBuffer.swift \
     EzSwitch/Log.swift \
     EzSwitch/Mappers/KeyboardLayoutUtility.swift \
     EzSwitch/Mappers/LayoutMapperPreset.swift \

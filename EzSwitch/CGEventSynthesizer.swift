@@ -8,25 +8,29 @@ import Cocoa
 /// `.cgAnnotatedSessionEventTap` sends the event to the focused app without
 /// re-entering our own HID event tap.
 enum CGEventSynthesizer {
+    static let workQueue = DispatchQueue(label: "ezswitch.input.work", qos: .userInteractive)
 
     /// Press and release `keyCode`, optionally holding `flags` for both halves.
     /// `delayUs` defaults to the standard key down/up gap.
     static func press(
         _ keyCode: UInt16,
         flags: CGEventFlags = [],
-        delayUs: UInt32 = Constants.Timing.keyDownUpDelayUs
+        delayUs: UInt32 = Constants.Timing.keyDownUpDelayUs,
+        targetPID: pid_t? = nil
     ) {
         let source = CGEventSource(stateID: .combinedSessionState)
 
         let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
         down?.flags = flags
-        down?.post(tap: .cgAnnotatedSessionEventTap)
+        if let targetPID { down?.postToPid(targetPID) }
+        else { down?.post(tap: .cgAnnotatedSessionEventTap) }
 
         usleep(delayUs)
 
         let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         up?.flags = flags
-        up?.post(tap: .cgAnnotatedSessionEventTap)
+        if let targetPID { up?.postToPid(targetPID) }
+        else { up?.post(tap: .cgAnnotatedSessionEventTap) }
     }
 
     /// Convenience overload for the `Int` key codes kept in `Constants.KeyCode`.
