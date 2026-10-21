@@ -73,14 +73,14 @@ enum Constants {
 
         // Paste (Cmd+V) — used by word sub auto-replace and hotkey training
         static let pasteCmdVDeferSec:     TimeInterval = 0.1   // if hotkey modifiers still held
-        static let pasteRestoreDelaySec:  TimeInterval = 0.25
+        static let pasteRestoreDelaySec:  TimeInterval = 0.4
 
         // Layout switch scheduled shortly after a word replacement so the
         // paste lands in the target app before the input source changes.
         static let layoutSwitchDelaySec:  TimeInterval = 0.08
 
         // Clipboard restore after a transform (TextTransformer)
-        static let clipboardRestoreDelay: TimeInterval = 0.12
+        static let clipboardRestoreDelay: TimeInterval = 0.25
 
         // The preset editor saves on every keystroke; coalesce those into a
         // single disk write once typing pauses.

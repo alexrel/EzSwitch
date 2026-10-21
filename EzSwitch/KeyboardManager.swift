@@ -534,7 +534,7 @@ final class KeyboardManager {
         // otherwise stall key delivery on the main thread. The event-tap
         // callback returns `nil` immediately (suppressing the separator key).
         // `isReplacingWord` guards on the tap's thread, so flip it there too.
-        DispatchQueue.main.async { [weak self] in self?.isReplacingWord = true }
+        isReplacingWord = true
         workQueue.async { [weak self] in
             guard let self = self else { return }
             self.replaceTypedWord(
@@ -571,7 +571,7 @@ final class KeyboardManager {
                 let other = applyCharacterMapping(word, from: pair.from, to: pair.to)
                 if !other.isEmpty && other != word {
                     let wordLength = word.count
-                    DispatchQueue.main.async { [weak self] in self?.isReplacingWord = true }
+                    isReplacingWord = true
                     workQueue.async { [weak self] in
                         guard let self = self else { return }
                         for _ in 0..<wordLength {
@@ -604,7 +604,7 @@ final class KeyboardManager {
             // Also replace the selection (still active after Cmd+C).
             let other = self.applyCharacterMapping(token, from: pair.from, to: pair.to)
             if !other.isEmpty && other != token {
-                DispatchQueue.main.async { [weak self] in self?.isReplacingWord = true }
+                self.isReplacingWord = true
                 self.workQueue.async { [weak self] in
                     self?.pasteText(other)
                     DispatchQueue.main.async { [weak self] in
@@ -710,22 +710,17 @@ final class KeyboardManager {
         ClipboardManager.shared.setString(text)
         usleep(Constants.Timing.keySequenceDelayUs)
 
-        // If the user is currently holding a hotkey modifier (e.g. ⌘⇧ from
-        // the word-remember hotkey), our Cmd+V would be interpreted as
-        // ⌘⇧V by the target app. Defer briefly so the modifier has a
-        // chance to be released first.
+        // If modifiers from the trigger hotkey are still held, wait so the
+        // target app sees plain Cmd+V. Sleep here on workQueue — not via
+        // asyncAfter on main — so the caller's isReplacingWord reset and
+        // layout switch always happen after Cmd+V is sent, not before.
         let currentFlags = CGEventSource.flagsState(.combinedSessionState)
         let problematic: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-        let needsDefer = !currentFlags.intersection(problematic).isEmpty
-
-        if needsDefer {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Timing.pasteCmdVDeferSec) { [weak self] in
-                self?.simulateCmdV()
-            }
-        } else {
-            simulateCmdV()
-            usleep(Constants.Timing.pasteSettleUs)
+        if !currentFlags.intersection(problematic).isEmpty {
+            Thread.sleep(forTimeInterval: Constants.Timing.pasteCmdVDeferSec)
         }
+        simulateCmdV()
+        usleep(Constants.Timing.pasteSettleUs)
 
         // Restore after paste settles, provided the clipboard still contains
         // our text. This content check cannot detect a new copy of identical text.
