@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// All-in-one mapper window: pick a layout pair + preset, then edit the
-/// mapping on a virtual keyboard. Replaces the previous two-step
-/// (preset list → editor) flow with a single, compact screen.
+/// Pair-scoped rule editor embedded in the settings window.
 struct MapperSettingsView: View {
+    @ObservedObject private var localization = AppLocalization.shared
     @ObservedObject private var store = MapperStore.shared
     @ObservedObject private var settings = SettingsManager.shared
     @State private var fromLayout: String = ""
@@ -11,6 +10,8 @@ struct MapperSettingsView: View {
     @State private var availableLayouts: [LayoutRegistry.Layout] = []
 
     var initialMode: EditorMode = .character
+    var initialFromLayout: String? = nil
+    var initialToLayout: String? = nil
 
     /// The preset being edited. `nil` means we are about to create a new one
     /// (after the user picks a pair and clicks "New" or "Auto").
@@ -29,14 +30,10 @@ struct MapperSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Top section: pair picker + segmented mode switcher.
-            // Keep these controls outside the changing editor content so
-            // switching tabs replaces only the area below the header.
+            // Pair selection stays separate from global feature preferences.
             VStack(spacing: 0) {
-                // 1) Pair + mode selector
                 header
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.bottom, SettingsLayout.editorSectionInset)
                 Divider()
             }
 
@@ -67,18 +64,18 @@ struct MapperSettingsView: View {
             }
             .frame(maxHeight: .infinity)
         }
-        .frame(minWidth: 780, minHeight: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             availableLayouts = LayoutRegistry.available()
             if fromLayout.isEmpty {
-                fromLayout = savedLayout(forKey: Constants.DefaultsKey.lastMapperFromLayout)
+                fromLayout = initialFromLayout ?? savedLayout(forKey: Constants.DefaultsKey.lastMapperFromLayout)
                     ?? (settings.leftCommandLayout != Constants.Default.noneLanguage
                         ? settings.leftCommandLayout
                         : Constants.Default.leftLayoutID)
             }
             if toLayout.isEmpty {
-                toLayout = savedLayout(forKey: Constants.DefaultsKey.lastMapperToLayout)
+                toLayout = initialToLayout ?? savedLayout(forKey: Constants.DefaultsKey.lastMapperToLayout)
                     ?? (settings.rightCommandLayout != Constants.Default.noneLanguage
                         ? settings.rightCommandLayout
                         : Constants.Default.rightLayoutID)
@@ -89,10 +86,8 @@ struct MapperSettingsView: View {
             mode = initialMode
             working = selectPresetForCurrentPair()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .switchMapperMode)) { notif in
-            if let newMode = notif.object as? EditorMode {
-                mode = newMode
-            }
+        .onChange(of: localization.languageCode) { _, _ in
+            availableLayouts = LayoutRegistry.available()
         }
         .onChange(of: fromLayout) { _, newVal in
             // Choosing a source the target already uses has to move the
@@ -106,7 +101,7 @@ struct MapperSettingsView: View {
             working = selectPresetForCurrentPair()
         }
         .sheet(isPresented: $showNewSheet) {
-            NewPresetSheet(
+            LocalizedContent { NewPresetSheet(
                 fromLayout: fromLayout,
                 toLayout: toLayout,
                 onCreate: { preset in
@@ -116,24 +111,24 @@ struct MapperSettingsView: View {
                     showNewSheet = false
                 },
                 onCancel: { showNewSheet = false }
-            )
+            ) }
         }
         .confirmationDialog(
-            String(localized: "Delete preset?"),
+            String(appLocalized: "Delete preset?"),
             isPresented: $showDeleteConfirmation,
             titleVisibility: .visible,
             presenting: working
         ) { preset in
-            Button(String(localized: "Delete “\(preset.name)”"), role: .destructive) {
+            Button(String(appLocalized: "Delete “\(preset.displayName)”"), role: .destructive) {
                 store.delete(id: preset.id)
                 if settings.selectedPresetId(for: fromLayout, toLayout) == preset.id {
                     settings.setSelectedPresetId(nil, for: fromLayout, toLayout)
                 }
                 working = selectPresetForCurrentPair()
             }
-            Button(String(localized: "Cancel"), role: .cancel) {}
+            Button(String(appLocalized: "Cancel"), role: .cancel) {}
         } message: { preset in
-            Text(String(localized: "“\(preset.name)” will be permanently removed. This cannot be undone."))
+            Text(String(appLocalized: "“\(preset.displayName)” will be permanently removed. This cannot be undone."))
         }
     }
 
@@ -150,34 +145,29 @@ struct MapperSettingsView: View {
         return presets.first
     }
 
-    // MARK: - Header (pair picker + mode switcher)
+    // MARK: - Pair selector
 
     private var header: some View {
         HStack(spacing: 12) {
+            Text(String(appLocalized: "Rules for pair"))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
             // Bidirectional language pair selector
             HStack(spacing: 6) {
                 Image(systemName: "globe")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.accentColor)
 
-                Picker("", selection: $fromLayout) {
-                    ForEach(fromLayoutOptions) { layout in
-                        Text(layout.label).tag(layout.id)
-                    }
-                }
-                .labelsHidden()
+                SettingsPicker(String(appLocalized: "From"), selection: $fromLayout,
+                               options: fromLayoutOptions.map { ($0.id, $0.label) })
                 .fixedSize()
 
                 Image(systemName: "arrow.left.and.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary.opacity(0.8))
 
-                Picker("", selection: $toLayout) {
-                    ForEach(toLayoutOptions) { layout in
-                        Text(layout.label).tag(layout.id)
-                    }
-                }
-                .labelsHidden()
+                SettingsPicker(String(appLocalized: "To"), selection: $toLayout,
+                               options: toLayoutOptions.map { ($0.id, $0.label) })
                 .fixedSize()
             }
             .padding(.horizontal, 9)
@@ -193,15 +183,16 @@ struct MapperSettingsView: View {
 
             Spacer()
 
-            // Mode switcher (Character Mappings vs Word Substitutions)
-            Picker("", selection: $mode) {
-                ForEach(EditorMode.allCases) { m in
-                    Text(LocalizedStringKey(m.rawValue)).tag(m)
-                }
+            Button {
+                let settings = SettingsManager.shared
+                fromLayout = settings.leftCommandLayout
+                toLayout = settings.rightCommandLayout
+                normalizePair()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 320)
+            .help(String(appLocalized: "Use switch-key pair"))
+            .accessibilityLabel(String(appLocalized: "Use switch-key pair"))
         }
     }
 
@@ -210,10 +201,10 @@ struct MapperSettingsView: View {
             Image(systemName: "keyboard")
                 .font(.system(size: 52))
                 .foregroundColor(.secondary.opacity(0.4))
-            Text(String(localized: "No preset for this pair"))
+            Text(String(appLocalized: "No preset for this pair"))
                 .font(.headline)
                 .foregroundColor(.secondary)
-            Text(String(localized: "Click “Auto” to generate a mapping, or “New” to start from scratch."))
+            Text(String(appLocalized: "Click “Auto” to generate a mapping, or “New” to start from scratch."))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -222,7 +213,7 @@ struct MapperSettingsView: View {
                 Button {
                     showNewSheet = true
                 } label: {
-                    Label(String(localized: "New"), systemImage: "plus")
+                    Label(String(appLocalized: "New"), systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
 
@@ -235,12 +226,13 @@ struct MapperSettingsView: View {
                         name: "\(displayFromLayout) ↔ \(displayToLayout) (auto)",
                         from: fromLayout,
                         to: toLayout,
-                        mapping: mapping
+                        mapping: mapping,
+                        nameStyle: .automatic
                     )
                     working = auto
                     settings.setSelectedPresetId(auto.id, for: fromLayout, toLayout)
                 } label: {
-                    Label(String(localized: "Auto-generate"), systemImage: "wand.and.stars")
+                    Label(String(appLocalized: "Auto-generate"), systemImage: "wand.and.stars")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(fromLayout == toLayout || fromLayout == noneOption || toLayout == noneOption)
@@ -295,6 +287,7 @@ struct MapperSettingsView: View {
 // MARK: - Working Editor Wrapper
 
 struct WorkingEditor: View {
+    @ObservedObject private var localization = AppLocalization.shared
     @Binding var working: LayoutMapperPreset?
     let presetsForPair: [LayoutMapperPreset]
     let onSelectPreset: (String) -> Void
@@ -322,6 +315,7 @@ struct WorkingEditor: View {
 // MARK: - New Preset Sheet
 
 struct NewPresetSheet: View {
+    @ObservedObject private var localization = AppLocalization.shared
     let fromLayout: String
     let toLayout: String
     let onCreate: (LayoutMapperPreset) -> Void
@@ -338,33 +332,34 @@ struct NewPresetSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(String(localized: "New preset"))
+            Text(String(appLocalized: "New preset"))
                 .font(.headline)
-            Text("\(displayFromLayout) → \(displayToLayout)")
+            Text(String(appLocalized: "\(displayFromLayout) → \(displayToLayout)"))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(String(localized: "Name"))
+                Text(String(appLocalized: "Name"))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 TextField("", text: $name)
                     .textFieldStyle(.roundedBorder)
             }
 
-            Toggle(String(localized: "Auto-generate mapping"), isOn: $generateAuto)
+            Toggle(String(appLocalized: "Auto-generate mapping"), isOn: $generateAuto)
+                .toggleStyle(LeadingSwitchToggleStyle())
 
             HStack {
                 Spacer()
-                Button(String(localized: "Cancel")) { onCancel() }
+                Button(String(appLocalized: "Cancel")) { onCancel() }
                     .keyboardShortcut(.cancelAction)
-                    .controlSize(.small)
                 Button {
                     var p = LayoutMapperPreset(
                         // Default to the readable pair, not the raw ids.
                         name: name.isEmpty ? "\(displayFromLayout) → \(displayToLayout)" : name,
                         fromLayout: fromLayout,
-                        toLayout: toLayout
+                        toLayout: toLayout,
+                        nameStyle: name.isEmpty ? .pair : .custom
                     )
                     if generateAuto {
                         p.mapping = KeyboardLayoutUtility.buildMapping(
@@ -374,14 +369,13 @@ struct NewPresetSheet: View {
                     }
                     onCreate(p)
                 } label: {
-                    Label(String(localized: "Create"), systemImage: "plus.circle.fill")
+                    Label(String(appLocalized: "Create"), systemImage: "plus.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .controlSize(.small)
             }
         }
         .padding(20)
-        .frame(width: 360)
+        .frame(width: 400)
     }
 }

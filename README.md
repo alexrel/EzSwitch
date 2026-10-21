@@ -18,6 +18,14 @@
 
 ## Features
 
+### Settings and Quick Controls
+- A compact menu bar panel provides feature switches and a session-only pause that preserves saved preferences.
+- One settings window contains General, Layout Switch, Text Transformation, Character Mappings, Word Substitutions, Permissions, and About.
+- Open settings with **⌘,** while EzSwitch is active. Dictionary links open the pair assigned to the switch keys.
+- General contains launch at login and interface language: system default, English, Russian, Ukrainian, or Hebrew. Language changes apply immediately, preserve editor state, and do not change keyboard layouts.
+- Permissions shows Accessibility and Input Monitoring separately, with links to the corresponding macOS settings.
+- Word substitutions include search and an explicit remember-shortcut button. Automatic replacement applies to all configured pairs; the dictionary editor shows only the selected pair.
+
 ### Command / Option Key Layout Switching
 - Press **Left Command** key → switch to Left layout (configurable)
 - Press **Right Command** key → switch to Right layout (configurable)
@@ -52,6 +60,7 @@
 - **Auto-generated** mappings via Apple's `UCKeyTranslate` Carbon API: select two layouts and click **Auto** (`✨`) to build a complete mapping from the system key code tables
 - **Tactile Dual-Legend Visual Keyboard** — styled after Apple Magic Keyboard dual-legend keycaps (source character in top-left, mapped target character in bottom-right, with LED-lit `Shift` modifier caps); click any key to customize
 - **Multi-character targets** — a single source key can map to a sequence (e.g. `й → "ja"`, `ц → "tz"`, emoji, or symbols)
+- **Extra mappings** — custom source characters, including those typed with Option or Shift+Option, participate in explicit text correction and its preview. Enter the actual produced character as the source. Extra rules override ordinary mappings and support reverse conversion with multi-character targets.
 - **Automatic reverse direction** — store only one preset per language pair; the opposite direction is rebuilt via longest-match (`TextTransformer.applyReverse`)
 - **Confirmation guards** — clicking **Auto** (`✨`), **Clear all keys** (`🧹`), or **Delete preset** (`🗑`) prompts for confirmation before overwriting or deleting custom mappings
 - **Live bidirectional test bar** — test your mapping in either direction directly above the keyboard without risking your saved keys
@@ -135,7 +144,7 @@ EzSwitch requires two macOS permissions to monitor keys and replace text:
 To grant permissions:
 1. Open **System Settings** → **Privacy & Security** → **Input Monitoring** and enable **EzSwitch**
 2. Open **System Settings** → **Privacy & Security** → **Accessibility** and enable **EzSwitch**
-3. Click **Restart** inside the EzSwitch popover (or relaunch the app)
+3. Open **Settings… → Permissions** and click **Restart** (or relaunch the app)
 
 ## Installation
 
@@ -169,20 +178,23 @@ To grant permissions:
 ## Usage
 
 1. Launch **EzSwitch** — a keyboard icon (`⌨️`) appears in your macOS menu bar
-2. Click the icon to open the **EzSwitch Settings** popover:
-   - **Layout Switch**: enable single-tap switching, choose **Command** or **Option**, and pick the layouts for **Left** and **Right**
-   - **Text Transformation**: choose the double-tap trigger key, toggle **Suppress in apps**, and toggle **Switch layout after**
-   - **System**: enable **Launch at login**, open **Keyboard Mappers**, or switch the active **Preset** directly from the popover
-   - **About (`ⓘ`)**: click the `ⓘ` icon in the header or `EzSwitch v1.0 • by AlexReL` in the footer to view version, build, author info, and the GitHub repository link
+2. Click the icon to open quick controls. Enable or disable individual features, or pause EzSwitch without changing saved preferences.
+3. Choose **Settings…** to configure the app:
+   - **General**: launch at login and interface language
+   - **Layout Switch**: Command/Option and the layouts assigned to each side
+   - **Text Transformation**: double-tap key, event suppression, and layout switching after correction
+   - **Character Mappings** and **Word Substitutions**: edit rules for a selected pair
+   - **Permissions**: inspect both permissions, open their system settings, and restart if needed
+   - **About EzSwitch**: version, build, author, and project link
 
 ### Configuring Mappers (`Character Mappings`)
 
-1. Open EzSwitch settings → **Keyboard Mappers** → **Open**
+1. Open EzSwitch settings → **Character Mappings**
 2. Select your language pair at the top (`Russian – PC ↔ ABC`)
-3. In the **Mapper editor** header:
-   - Use the **Preset** dropdown to switch between saved presets for the pair
+3. In the editor header:
+   - Use the **Active preset** dropdown to switch between saved presets for the pair
    - Click **+ New** to create a custom preset
-   - Click **Auto** (`✨`) to automatically populate all keys from the installed macOS keyboard layouts via `UCKeyTranslate`
+   - Click **Auto-generate** to automatically populate all keys from the installed macOS keyboard layouts via `UCKeyTranslate`
    - Click **Clear all keys** (`🧹`) to reset keys in the current preset, or **Delete preset** (`🗑`) to remove the preset
 4. Click any keycap on the virtual keyboard (Base or `⇧ Shift` layer) to customize its target character or multi-character string
 
@@ -198,17 +210,20 @@ To grant permissions:
 
 ### Configuring Word Substitutions (`Word Substitutions`)
 
-1. Switch to the **Word Substitutions** tab in the Mappers window
-2. **Quick training via Hotkey**: type a word in any app (e.g. `пше`) or select a word, then press **⌘⌥M** (customizable by clicking the hotkey badge in the header). EzSwitch replaces the word with `git` in place and saves `пше → git` to your list
+1. Open **Word Substitutions** in the settings sidebar, or choose **Dictionary…** in quick controls
+2. **Quick training via Hotkey**: type a word in any app (e.g. `пше`) or select a word, then press **⌘⌥M** (customizable using the **Remember Word** button in the header). EzSwitch replaces the word with `git` in place and saves `пше → git` to your list
 3. **Manual entry**: click **+ Add** to add a custom word pair. Check **Switch keyboard layout to target language** (`🌐 Switch layout`) if you want the system keyboard layout to automatically switch to the target language upon replacement
-4. **Editing & Deleting**: click **Edit** (or double-click any row) to modify the source/target word or toggle layout switching; click `✕` to delete an entry
+4. **Editing & Deleting**: click a row to modify the source/target word or toggle layout switching; click its trash button to delete the entry. Use the search field to find source or target words
 
 ## Architecture
 
 The application is written in Swift & SwiftUI (`EzSwitch/*.swift`):
 
 - **`AppDelegate`**: Application lifecycle, accessory activation policy (menu bar only), and initial permission checks
-- **`StatusBarController`**: Manages the `NSStatusItem` and transient `NSPopover` hosting `SettingsView`
+- **`StatusBarController`**: Manages the `NSStatusItem` and transient `NSPopover` hosting `QuickControlsView`
+- **`SettingsWindowController`**: Owns the single settings window and routes direct links to the selected editor and layout pair
+- **`SettingsView`**: Sidebar preferences, interface language, permissions, and embedded rule editors
+- **`AppLocalization`**: Live translation bundles, system-language resolution, and locale updates that preserve editor state
 - **`KeyboardManager`**: Monitors global key events via `CGEvent.tapCreate`, tracks single modifier taps, double-tap transform triggers, system layout changes (`kTISNotifySelectedKeyboardInputSourceChanged` for `previousLayout` tracking), and live word buffering for automatic substitutions
 - **`TextTransformer`**: Transforms selected text or the last word before the cursor; features **Multi-Language Pivot & Cycling** with `previousLayout` priority and consecutive double-tap cycling across multiple layouts (with Undo on 3rd press)
 - **`ClipboardManager`**: Preserves and restores the system `NSPasteboard` around synthetic `⌘C` / `⌘V` operations
@@ -257,7 +272,7 @@ EzSwitch follows Semantic Versioning with automated build numbering:
   ./scripts/bump_version.sh 1.2.0
   ```
 - **Build Number** (`CFBundleVersion`): Automatically derived from the Git commit count (`git rev-list --count HEAD`) on every build.
-- **Git Commit Hash**: Embedded into the app bundle's `Info.plist` and displayed in the **About** popover (`v1.1.0 (build 4 · f3c94bd)`).
+- **Git Commit Hash**: Embedded into the app bundle's `Info.plist` and displayed in **About EzSwitch** (`v1.1.0 (build 4 · f3c94bd)`).
 
 ## Author
 

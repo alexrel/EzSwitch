@@ -144,6 +144,15 @@ final class KeyboardManager {
     }
 
     func stopMonitoring() {
+        leftCmd = KeyState()
+        rightCmd = KeyState()
+        lastTransformKeyRelease = 0
+        lastTransformKeyCode = 0
+        transformKeyDown = false
+        transformKeyCancelled = false
+        leftShiftDown = false
+        rightShiftDown = false
+        wordBuffer.removeAll()
         guard let tap = eventTap else { return }
 
         CGEvent.tapEnable(tap: tap, enable: false)

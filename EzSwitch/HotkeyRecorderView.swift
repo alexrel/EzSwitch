@@ -4,6 +4,7 @@ import Carbon
 
 /// Visual representation of hotkey tokens as physical-style keyboard keycaps.
 struct KeycapsView: View {
+    @ObservedObject private var localization = AppLocalization.shared
     let tokens: [String]
     var scale: KeycapScale = .regular
 
@@ -18,7 +19,7 @@ struct KeycapsView: View {
     private var fontSize: CGFloat {
         switch scale {
         case .small: return 10
-        case .regular: return 11
+        case .regular: return 13
         case .large: return 15
         }
     }
@@ -26,7 +27,7 @@ struct KeycapsView: View {
     private var minWidth: CGFloat {
         switch scale {
         case .small: return 15
-        case .regular: return 19
+        case .regular: return 22
         case .large: return 28
         }
     }
@@ -34,7 +35,7 @@ struct KeycapsView: View {
     private var minHeight: CGFloat {
         switch scale {
         case .small: return 14
-        case .regular: return 18
+        case .regular: return 24
         case .large: return 28
         }
     }
@@ -57,7 +58,7 @@ struct KeycapsView: View {
 
     var body: some View {
         if tokens.isEmpty {
-            Text(String(localized: "None"))
+            Text(String(appLocalized: "None"))
                 .font(.system(size: fontSize, weight: .regular, design: .rounded))
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
@@ -99,8 +100,9 @@ struct KeycapsView: View {
 /// KeyboardManager separately disables word substitution in EzSwitch windows;
 /// a local monitor does not bypass the global event tap.
 struct HotkeyRecorderView: View {
+    @ObservedObject private var localization = AppLocalization.shared
     @Binding var hotkey: Hotkey
-    let actionName: String
+    let actionName: String.LocalizationValue
     let onClose: () -> Void
 
     @State private var captured: Hotkey? = nil
@@ -113,9 +115,9 @@ struct HotkeyRecorderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(String(localized: "Set Hotkey for \(actionName)"))
+                Text(String(appLocalized: "Set Hotkey for \(String(appLocalized: actionName))"))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                Text(String(localized: "Press a key combination. Cmd, Shift, Option, Control and a single key are required."))
+                Text(String(appLocalized: "Press a key combination. Cmd, Shift, Option, Control and a single key are required."))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -123,7 +125,7 @@ struct HotkeyRecorderView: View {
 
             // Hero hotkey presentation using realistic keycaps
             HStack(spacing: 12) {
-                Text(String(localized: "Hotkey"))
+                Text(String(appLocalized: "Hotkey"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.secondary)
                     .frame(width: 60, alignment: .leading)
@@ -138,7 +140,7 @@ struct HotkeyRecorderView: View {
                                 .font(.system(size: 16))
                         }
                     } else {
-                        Text(String(localized: "Not set"))
+                        Text(String(appLocalized: "Not set"))
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 4)
@@ -168,20 +170,18 @@ struct HotkeyRecorderView: View {
                 Button {
                     captured = Hotkey.none
                 } label: {
-                    Label(String(localized: "Clear"), systemImage: "trash")
+                    Label(String(appLocalized: "Clear"), systemImage: "trash")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
                 .tint(.red)
                 .focusable(false)
 
                 Spacer()
 
                 Button(action: onClose) {
-                    Label(String(localized: "Cancel"), systemImage: "xmark")
+                    Label(String(appLocalized: "Cancel"), systemImage: "xmark")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
                 .keyboardShortcut(.cancelAction)
                 .focusable(false)
 
@@ -189,10 +189,9 @@ struct HotkeyRecorderView: View {
                     if let c = captured { hotkey = c }
                     onClose()
                 } label: {
-                    Label(String(localized: "Save"), systemImage: "checkmark")
+                    Label(String(appLocalized: "Save"), systemImage: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
                 .disabled(captured == nil)
             }

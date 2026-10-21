@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // Standalone harness for mapping, matching, hotkey, and picker logic.
 // The app has no XCTest target; run the wrapper to compile these sources
@@ -70,12 +71,14 @@ func testPresetTransform() {
     equal(multi.reversedCharacterMapping()["Q"], nil, "multi-char target is not reversible")
     equal(multi.transform("привет"), "ghbdtn", "multi-char target does not break forward mapping")
 
-    // Extra mappings are applied after the character map.
+    // Extra rules match original input, before the ordinary keys consume it.
     var withExtra = preset
     withExtra.extraMappings = [
-        LayoutMapperPreset.ExtraMapping(source: "ghbdtn", target: "HELLO")
+        LayoutMapperPreset.ExtraMapping(source: "привет", target: "HELLO")
     ]
-    equal(withExtra.transform("привет"), "HELLO", "extra mapping applied after transform")
+    equal(withExtra.transform("привет"), "HELLO", "extra mapping matches the original input")
+    equal(withExtra.apply("привет", from: "Russian – PC"), "HELLO", "live conversion uses the same extra rule as preview")
+    equal(withExtra.apply("HELLO", from: "ABC"), "привет", "extra text rule reverses with longest-match")
 
     // apply(_:from:) returns the right side for the requested direction.
     equal(preset.apply("й", from: "Russian – PC"), "q", "forward mapping side")
@@ -87,7 +90,76 @@ func testPresetTransform() {
     equal(preset.apply("q g", from: "ABC"), "й п", "reverse maps char by char")
 }
 
+func testExtraMappings() {
+    var preset = makePreset()
+    preset.extraMappings = [.init(source: "Ђ", target: "¸", modifier: .shiftOption)]
+    equal(preset.apply("Ђ", from: preset.fromLayout), "¸", "Shift+Option source is converted in the real pipeline")
+    equal(preset.transform("Ђ"), "¸", "Shift+Option source works in preview")
+    equal(preset.apply("¸", from: preset.toLayout), "Ђ", "Shift+Option rule reverses")
+    equal(preset.transform("¸"), "Ђ", "preview detects the reverse extra rule")
+    equal(preset.apply("йЂ п", from: preset.fromLayout), "q¸ g", "extra rules coexist with ordinary mapping")
+
+    preset.extraMappings = [
+        .init(source: "п", target: "ZZ", modifier: .none),
+        .init(source: "Ж", target: "🙂", modifier: .shift),
+        .init(source: "џ", target: "XYZ", modifier: .option),
+        .init(source: "", target: "ignored"),
+        .init(source: "й", target: "")
+    ]
+    preset.mapping["я"] = "ZZ"
+    equal(preset.apply("пЖџй", from: preset.fromLayout), "ZZ🙂XYZq", "all modifier variants and Unicode targets work; incomplete rules are ignored")
+    equal(preset.apply("ZZ🙂XYZ", from: preset.toLayout), "пЖџ", "explicit extras win ambiguous inverses")
+    equal(preset.transform("XYZ"), "џ", "preview recognizes multi-character extra targets")
+
+    preset.extraMappings = [.init(source: "п", target: "й"), .init(source: "й", target: "!"), .init(source: "п", target: "ц")]
+    equal(preset.apply("пй", from: preset.fromLayout), "ц!", "later duplicate extras win and targets are not transformed again")
+    equal(preset.transform("пй"), "ц!", "preview never cascades extra replacements")
+
+    preset.mapping = ["й": "QQ", "п": "Q"]
+    preset.extraMappings = []
+    equal(preset.apply("QQQ", from: preset.toLayout), "йп", "short reverse fallback survives an incomplete longer match")
+    equal(preset.transform("QQ"), "й", "preview recognizes multi-character ordinary targets")
+
+    do {
+        preset.extraMappings = [.init(source: "Ђ", target: "¸", modifier: .shiftOption)]
+        let restored = try JSONDecoder().decode(LayoutMapperPreset.self, from: JSONEncoder().encode(preset))
+        equal(restored.extraMappings, preset.extraMappings, "extra source, target and modifier survive persistence")
+        equal(restored.apply("Ђ", from: restored.fromLayout), "¸", "saved extra rule remains effective after loading")
+    } catch { check(false, "extra mapping persistence: \(error)") }
+}
+
 // MARK: - Hotkey
+
+func testExtraMappingSourceDetection() {
+    let ru = "com.apple.keylayout.RussianWin"
+    let abc = "com.apple.keylayout.ABC"
+    let he = "com.apple.keylayout.Hebrew"
+    let candidates = [ru, abc, he]
+    var preset = LayoutMapperPreset(name: "extra", fromLayout: ru, toLayout: abc,
+                                    mapping: ["п": "g"],
+                                    extraMappings: [.init(source: "Ђ", target: "¸", modifier: .shiftOption)])
+    // Deliberately exclude Option characters, just like the real base cache.
+    let characters: [String: Set<Character>] = [ru: Set("привет"), abc: Set("hello"), he: Set("שלום")]
+    func detect(_ text: String, current: String, presets: [LayoutMapperPreset]) -> String {
+        TransformSourceDetection.layout(for: text, current: current, candidates: candidates,
+                                        activePresets: presets, charactersProduced: { characters[$0] ?? [] })
+    }
+    for current in candidates {
+        let source = detect("Ђ", current: current, presets: [preset])
+        equal(source, ru, "extra source is recognized with \(current) active")
+        equal(preset.apply("Ђ", from: source), "¸", "detected direction applies the extra rule")
+        let reverseSource = detect("¸", current: current, presets: [preset])
+        equal(reverseSource, abc, "extra punctuation target is recognized with \(current) active")
+        equal(preset.apply("¸", from: reverseSource), "Ђ", "detected reverse direction applies the extra rule")
+    }
+    equal(detect("123 !?", current: he, presets: [preset]), he, "unmapped shared punctuation preserves current layout")
+    equal(detect("hello", current: ru, presets: [preset]), abc, "ordinary letter detection is preserved")
+    equal(detect("Ђ", current: abc, presets: []), abc, "inactive preset extras do not influence detection")
+    preset.extraMappings = [.init(source: "Ђ", target: "XYZ", modifier: .shiftOption)]
+    equal(detect("XYZ", current: ru, presets: [preset]), abc, "multi-character extra targets identify the reverse source")
+    preset.extraMappings = [.init(source: "Ђ", target: "")]
+    equal(detect("Ђ", current: abc, presets: [preset]), abc, "incomplete extra rules provide no evidence")
+}
 
 func testHotkeyCoding() {
     let hotkey = Hotkey(keyCode: 46, modifiers: Constants.ModifierMask.command | Constants.ModifierMask.shift)
@@ -197,8 +269,148 @@ func testMapperPairOptions() {
 
 // MARK: - Run
 
+func testLiveLayoutNames() {
+    let localization = AppLocalization.shared
+    let original = localization.language
+    defer { localization.apply(original) }
+
+    let hebrew = "com.apple.keylayout.Hebrew"
+    let russian = "com.apple.keylayout.RussianWin"
+    let expectedHebrew: [(AppLanguage, String)] = [(.he, "עברית"), (.ru, "Иврит"), (.uk, "Іврит"), (.en, "Hebrew"), (.he, "עברית")]
+    let originalIDs = Set(LayoutRegistry.available().map(\.id))
+    for (language, expected) in expectedHebrew {
+        localization.apply(language)
+        let layouts = LayoutRegistry.available()
+        equal(Set(layouts.map(\.id)), originalIDs, "changing language preserves available layout IDs")
+        equal(LayoutRegistry.displayName(forID: hebrew), expected, "layout display name follows \(language) in the same process")
+        if let row = layouts.first(where: { $0.id == hebrew }) {
+            equal(row.label, expected, "picker rows use the current language")
+        }
+        let extra = LayoutRegistry.switcherOptions([], including: [hebrew])
+        equal(extra.first(where: { $0.id == hebrew })?.label, expected, "configured extra layouts use the current language")
+    }
+    localization.apply(.ru)
+    equal(LayoutPair.normalized(LayoutRegistry.displayName(forID: russian)),
+          LayoutPair.normalized("Русская — ПК"), "Russian PC retains its variant in the localized name")
+    equal(LayoutRegistry.displayName(forID: "com.example.removed-layout"), "com.example.removed-layout", "unknown layouts retain their stored identity")
+    equal(LayoutRegistry.displayName(forID: Constants.Default.noneLanguage), Constants.Default.noneLanguage, "the unset layout is unchanged")
+}
+
+func testPresetDisplayNames() {
+    let localization = AppLocalization.shared
+    let original = localization.language
+    defer { localization.apply(original) }
+    let ru = "com.apple.keylayout.RussianWin"
+    let abc = "com.apple.keylayout.ABC"
+    let oldName = "Русская — ПК ↔ ABC (auto)"
+    var automatic = LayoutMapperPreset(name: oldName, fromLayout: ru, toLayout: abc, mapping: ["й": "q"])
+    equal(automatic.resolvedNameStyle, .automatic, "legacy generated title is recognized by its exact pair")
+    for language in [AppLanguage.en, .he, .ru, .uk, .en] {
+        localization.apply(language)
+        let expected = "\(LayoutRegistry.displayName(forID: ru)) ↔ \(LayoutRegistry.displayName(forID: abc))"
+        // Foundation isolates interpolated layout labels in RTL strings.
+        let visibleTitle = automatic.displayName.replacingOccurrences(of: "\u{2068}", with: "")
+            .replacingOccurrences(of: "\u{2069}", with: "")
+        check(visibleTitle.hasPrefix(expected), "generated title follows \(language) without restarting")
+        equal(automatic.name, oldName, "display localization never rewrites the stored title")
+        equal(automatic.mapping, ["й": "q"], "display localization preserves mapping data")
+    }
+    let custom = LayoutMapperPreset(name: "My ↔ favorite (auto)", fromLayout: ru, toLayout: abc)
+    equal(custom.resolvedNameStyle, .custom, "arbitrary user name with an auto suffix stays custom")
+    let exactCustom = LayoutMapperPreset(name: oldName, fromLayout: ru, toLayout: abc, nameStyle: .custom)
+    equal(exactCustom.displayName, oldName, "an explicitly custom name is preserved even when it looks generated")
+    let pair = LayoutMapperPreset(name: "Russian – PC → ABC", fromLayout: ru, toLayout: abc)
+    equal(pair.resolvedNameStyle, .pair, "legacy default pair-only title is recognized")
+    automatic.nameStyle = automatic.resolvedNameStyle
+    do {
+        let restored = try JSONDecoder().decode(LayoutMapperPreset.self, from: JSONEncoder().encode(automatic))
+        equal(restored.nameStyle, .automatic, "generated-name metadata survives persistence")
+        equal(restored.name, oldName, "metadata migration retains the stored title")
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(automatic)) as! [String: Any]
+        legacy.removeValue(forKey: "nameStyle")
+        let decoded = try JSONDecoder().decode(LayoutMapperPreset.self, from: JSONSerialization.data(withJSONObject: legacy))
+        equal(decoded.nameStyle, nil, "old presets decode without name metadata")
+        equal(decoded.resolvedNameStyle, .automatic, "old decoded presets retain dynamic generated titles")
+    } catch { check(false, "preset name persistence: \(error)") }
+}
+
+func testAppLanguagePreference() {
+    let suite = "EzSwitch.LanguageTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    equal(AppLanguage.stored(in: defaults), .system, "interface follows system by default")
+    AppLanguage.he.save(in: defaults)
+    equal(AppLanguage.stored(in: defaults), .he, "Hebrew language selection persists")
+    equal(defaults.stringArray(forKey: "AppleLanguages"), ["he"], "language override is available at next launch")
+    AppLanguage.uk.save(in: defaults)
+    equal(defaults.stringArray(forKey: "AppleLanguages"), ["uk"], "changing language replaces previous override")
+    AppLanguage.system.save(in: defaults)
+    equal(AppLanguage.stored(in: defaults), .system, "system selection persists")
+    check(defaults.persistentDomain(forName: suite)?["AppleLanguages"] == nil,
+          "system selection removes per-app language override")
+}
+
+func testLiveLocalization() {
+    let bundleURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        .deletingLastPathComponent().appendingPathComponent("LocalizationTests.bundle")
+    guard let resources = Bundle(url: bundleURL) else {
+        check(false, "localization test bundle exists")
+        return
+    }
+    var systemLanguages = ["uk-UA", "en-US"]
+    let localization = AppLocalization(language: .en, resourceBundle: resources, systemLanguages: { systemLanguages })
+    var changes: [String] = []
+    let observation = localization.$languageCode.dropFirst().sink { changes.append($0) }
+    defer { observation.cancel() }
+
+    equal(localization.string("General"), "General", "initial English lookup")
+    localization.apply(.ru)
+    equal(localization.string("General"), "Основные", "Russian applies without restarting")
+    let name = "My preset"
+    let count = 7
+    equal(localization.string("Delete “\(name)”"), "Удалить «My preset»", "interpolated names survive translation")
+    equal(localization.string("This will clear all \(count) mapped keys in “\(name)”."),
+          "При этом будут очищены все 7 сопоставленные клавиши в «My preset».", "integer and string interpolation retain their types")
+    localization.apply(.uk)
+    equal(localization.string("General"), "Основні", "Ukrainian applies in the same process")
+    localization.apply(.he)
+    equal(localization.string("General"), "כללי", "Hebrew applies in the same process")
+    let from = "רוסית"
+    let to = "ABC"
+    equal(localization.string("\(from) ↔ \(to) (auto)"), "\u{2068}רוסית\u{2069} ↔ \u{2068}ABC\u{2069} (אוטומטי)", "automatic preset suffix localizes and isolates mixed-direction layout names")
+    check(localization.isRightToLeft, "Hebrew enables RTL")
+    localization.apply(.en)
+    equal(localization.string("General"), "General", "switching back does not reuse cached translation")
+    check(!localization.isRightToLeft, "returning to English restores LTR")
+    equal(localization.string("Missing key: \(name)"), "Missing key: My preset", "missing keys preserve default interpolation")
+
+    localization.apply(.system)
+    equal(localization.languageCode, "uk", "system choice ignores the previously selected app language")
+    systemLanguages = ["he-IL"]
+    localization.refreshSystemLanguage()
+    equal(localization.languageCode, "he", "system-language preference can refresh live")
+    localization.apply(.ru)
+    systemLanguages = ["en-US"]
+    localization.refreshSystemLanguage()
+    equal(localization.languageCode, "ru", "system changes do not replace an explicit choice")
+    localization.apply(.ru)
+    equal(changes, ["ru", "uk", "he", "en", "uk", "he", "ru"], "only actual language changes publish a UI update")
+
+    equal(AppLocalization.resolve(.system, systemLanguages: ["fr-FR", "uk-UA"]), "uk", "supported secondary system language is preferred")
+    equal(AppLocalization.resolve(.system, systemLanguages: ["fr-FR"]), "en", "unsupported language falls back to English")
+    equal(AppLocalization.resolve(.system, systemLanguages: []), "en", "empty system preferences fall back to English")
+    equal(AppLocalization.resolve(.en, systemLanguages: ["he-IL"]), "en", "explicit choice ignores system preferences")
+}
+
+testAppLanguagePreference()
+testLiveLocalization()
+testLiveLayoutNames()
+testPresetDisplayNames()
 testWordMatcher()
 testPresetTransform()
+testExtraMappings()
+testExtraMappingSourceDetection()
 testHotkeyCoding()
 testLayoutPairNormalization()
 testLayoutIdentityUsesStableIDs()

@@ -7,6 +7,7 @@ import SwiftUI
 /// Case (Shift/Caps) is automatically preserved by `WordMatcher`.
 /// For reverse behavior, add the reverse substitution separately.
 struct WordSubstitutionView: View {
+    @ObservedObject private var localization = AppLocalization.shared
 
     private struct WordEntry: Identifiable {
         let source: String
@@ -27,6 +28,7 @@ struct WordSubstitutionView: View {
     @State private var deleteCandidate: String? = nil
     @State private var showHotkeySheet: Bool = false
     @State private var editingEntry: WordEntry? = nil
+    @State private var search = ""
 
     /// Localized names of the selected pair. `fromLayout`/`toLayout` hold
     /// stable input source ids, which mean nothing to the user.
@@ -36,8 +38,7 @@ struct WordSubstitutionView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 16)
-                .frame(height: 56)
+                .padding(.vertical, SettingsLayout.editorSectionInset)
             Divider()
             if currentPair == nil {
                 pairMissingState
@@ -57,8 +58,8 @@ struct WordSubstitutionView: View {
             if !newVal.isEmpty { toLayout = newVal }
         }
         .sheet(isPresented: $showAddSheet) {
-            WordEntrySheet(
-                title: String(localized: "Add Word Substitution"),
+            LocalizedContent { WordEntrySheet(
+                title: "Add Word Substitution",
                 fromLayout: fromLayout,
                 toLayout: toLayout,
                 initialSource: "",
@@ -70,11 +71,11 @@ struct WordSubstitutionView: View {
                     showAddSheet = false
                 },
                 onCancel: { showAddSheet = false }
-            )
+            ) }
         }
         .sheet(item: $editingEntry) { entry in
-            WordEntrySheet(
-                title: String(localized: "Edit Word Substitution"),
+            LocalizedContent { WordEntrySheet(
+                title: "Edit Word Substitution",
                 fromLayout: fromLayout,
                 toLayout: toLayout,
                 initialSource: entry.source,
@@ -90,17 +91,17 @@ struct WordSubstitutionView: View {
                     editingEntry = nil
                 },
                 onCancel: { editingEntry = nil }
-            )
+            ) }
         }
         .sheet(isPresented: $showHotkeySheet) {
-            HotkeyRecorderView(
+            LocalizedContent { HotkeyRecorderView(
                 hotkey: $settings.wordRememberHotkey,
-                actionName: String(localized: "Remember Word"),
+                actionName: "Remember Word",
                 onClose: { showHotkeySheet = false }
-            )
+            ) }
         }
         .confirmationDialog(
-            String(localized: "Delete substitution?"),
+            String(appLocalized: "Delete substitution?"),
             isPresented: Binding(
                 get: { deleteCandidate != nil },
                 set: { if !$0 { deleteCandidate = nil } }
@@ -108,34 +109,34 @@ struct WordSubstitutionView: View {
             titleVisibility: .visible,
             presenting: deleteCandidate
         ) { source in
-            Button(String(localized: "Delete “\(source)”"), role: .destructive) {
+            Button(String(appLocalized: "Delete “\(source)”"), role: .destructive) {
                 if let pair = currentPair {
                     wordStore.remove(source: source, for: pair)
                 }
                 deleteCandidate = nil
             }
-            Button(String(localized: "Cancel"), role: .cancel) {
+            Button(String(appLocalized: "Cancel"), role: .cancel) {
                 deleteCandidate = nil
             }
         } message: { _ in
-            Text(String(localized: "This will remove the substitution for this language pair."))
+            Text(String(appLocalized: "This will remove the substitution for this language pair."))
         }
         .confirmationDialog(
-            String(localized: "Clear all substitutions for this pair?"),
+            String(appLocalized: "Clear all substitutions for this pair?"),
             isPresented: $showClearConfirmation,
             titleVisibility: .visible
         ) {
-            Button(String(localized: "Clear all"), role: .destructive) {
+            Button(String(appLocalized: "Clear all"), role: .destructive) {
                 if let pair = currentPair {
                     wordStore.removeAll(for: pair)
                 }
                 showClearConfirmation = false
             }
-            Button(String(localized: "Cancel"), role: .cancel) {
+            Button(String(appLocalized: "Cancel"), role: .cancel) {
                 showClearConfirmation = false
             }
         } message: {
-            Text(String(localized: "All word substitutions for \(displayFromLayout) ↔ \(displayToLayout) will be removed."))
+            Text(String(appLocalized: "All word substitutions for \(displayFromLayout) ↔ \(displayToLayout) will be removed."))
         }
     }
 
@@ -157,71 +158,60 @@ struct WordSubstitutionView: View {
         .sorted { $0.source < $1.source }
     }
 
-    @ViewBuilder
+    private var filteredEntries: [WordEntry] {
+        guard !search.isEmpty else { return entries }
+        return entries.filter {
+            $0.source.localizedCaseInsensitiveContains(search) || $0.target.localizedCaseInsensitiveContains(search)
+        }
+    }
+
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(String(localized: "Word Substitutions"))
-                        .font(.title3.bold())
-                    Text(verbatim: "\(entries.count) " + String(localized: "words"))
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(.accentColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(Color.accentColor.opacity(0.12))
-                        )
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Toggle(String(appLocalized: "Auto-replace"), isOn: $settings.enableWordSubstitution)
+                        .toggleStyle(LeadingSwitchToggleStyle())
+                    Text(String(appLocalized: "For all configured pairs"))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                Text("\(displayFromLayout) ↔ \(displayToLayout)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .fixedSize(horizontal: true, vertical: true)
-
-            Spacer()
-
-            Button {
-                showHotkeySheet = true
-            } label: {
-                KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .regular)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color(NSColor.controlBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                Spacer()
+                Button { showHotkeySheet = true } label: {
+                    HStack(spacing: 8) {
+                        Text(String(appLocalized: "Remember Word"))
+                        KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .regular)
+                        Image(systemName: "pencil")
+                    }
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
-                    )
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .help(String(appLocalized: "Change hotkey for remembering words"))
             }
-            .buttonStyle(.plain)
-            .help(String(localized: "Change hotkey for remembering words"))
-
-            Toggle(String(localized: "Auto-replace"), isOn: $settings.enableWordSubstitution)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .font(.system(size: 12))
-
-            Button {
-                showAddSheet = true
-            } label: {
-                Label(String(localized: "Add"), systemImage: "plus")
+            Divider()
+            HStack(spacing: 12) {
+                Text(verbatim: "\(entries.count) " + String(appLocalized: "words"))
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                Spacer()
+                TextField(String(appLocalized: "Find a word…"), text: $search)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 230)
+                Button { showAddSheet = true } label: {
+                    Label(String(appLocalized: "Add"), systemImage: "plus")
+                }
+                .disabled(currentPair == nil)
+                Button(role: .destructive) { showClearConfirmation = true } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(entries.isEmpty)
+                .help(String(appLocalized: "Clear all"))
+                .accessibilityLabel(String(appLocalized: "Clear all"))
             }
-            .controlSize(.small)
-            .disabled(currentPair == nil)
-            .help(String(localized: "Add substitution"))
-
-            Button(role: .destructive) {
-                showClearConfirmation = true
-            } label: {
-                Image(systemName: "trash")
-            }
-            .controlSize(.small)
-            .disabled(entries.isEmpty)
-            .help(String(localized: "Clear all"))
         }
     }
 
@@ -231,7 +221,7 @@ struct WordSubstitutionView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 40))
                 .foregroundColor(.secondary.opacity(0.5))
-            Text(String(localized: "Configure a language pair in the popover first"))
+            Text(String(appLocalized: "Choose two different layouts above to edit their rules."))
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
@@ -245,30 +235,33 @@ struct WordSubstitutionView: View {
                 Image(systemName: "textformat")
                     .font(.system(size: 40))
                     .foregroundColor(.secondary.opacity(0.4))
-                Text(String(localized: "No word substitutions for \(displayFromLayout) ↔ \(displayToLayout)"))
+                Text(String(appLocalized: "No word substitutions for \(displayFromLayout) ↔ \(displayToLayout)"))
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                 HStack(spacing: 4) {
-                    Text(String(localized: "Type a word in any app, then press"))
+                    Text(String(appLocalized: "Type a word in any app, then press"))
                     KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .small)
-                    Text(String(localized: "to remember it"))
+                    Text(String(appLocalized: "to remember it"))
                 }
                 .font(.system(size: 11))
                 .foregroundColor(.secondary.opacity(0.7))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filteredEntries.isEmpty {
+            ContentUnavailableView.search(text: search)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     // Column headers matching the card rows
                     HStack(spacing: 8) {
-                        Text(String(localized: "Source"))
+                        Text(String(appLocalized: "Source"))
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.secondary)
                             .frame(minWidth: 90, alignment: .leading)
                         Spacer()
                             .frame(width: 16)
-                        Text(String(localized: "Target"))
+                        Text(String(appLocalized: "Target"))
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.secondary)
                         Spacer()
@@ -277,7 +270,7 @@ struct WordSubstitutionView: View {
                     .padding(.bottom, 2)
 
                     VStack(spacing: 5) {
-                        ForEach(entries) { row in
+                        ForEach(filteredEntries) { row in
                             MappingListRow(
                                 source: row.source,
                                 target: row.target,
@@ -304,8 +297,7 @@ struct WordSubstitutionView: View {
                                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
                         )
                 )
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.top, SettingsLayout.editorSectionInset)
             }
         }
     }
@@ -317,7 +309,8 @@ struct WordSubstitutionView: View {
 /// Language-agnostic (`Source → Target`), with an automatic translation button
 /// (`Auto`). Case is preserved automatically by WordMatcher.
 private struct WordEntrySheet: View {
-    let title: String
+    @ObservedObject private var localization = AppLocalization.shared
+    let title: String.LocalizationValue
     let fromLayout: String
     let toLayout: String
     let initialSource: String
@@ -345,10 +338,10 @@ private struct WordEntrySheet: View {
         VStack(spacing: 14) {
             // Top: Title on left, language pair badge on right
             HStack(spacing: 8) {
-                Text(title)
+                Text(String(appLocalized: title))
                     .font(.headline)
                 Spacer()
-                Text("\(displayFromLayout) ↔ \(displayToLayout)")
+                Text(String(appLocalized: "\(displayFromLayout) ↔ \(displayToLayout)"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 8)
@@ -362,11 +355,12 @@ private struct WordEntrySheet: View {
             // Middle: Language-agnostic Source → Target boxes
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(String(localized: "Source (what you type)"))
+                    Text(String(appLocalized: "Source (what you type)"))
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField(String(localized: "e.g. ghbdtn or пше"), text: $source)
+                    TextField(String(appLocalized: "e.g. ghbdtn or пше"), text: $source)
                         .textFieldStyle(.plain)
+                        .multilineTextAlignment(.leading)
                         .font(.system(size: 12.5, weight: .medium, design: .rounded))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
@@ -387,17 +381,18 @@ private struct WordEntrySheet: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                Image(systemName: "arrow.right")
+                Image(systemName: localization.isRightToLeft ? "arrow.left" : "arrow.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.secondary)
                     .padding(.bottom, 6)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(String(localized: "Target (replaced with)"))
+                    Text(String(appLocalized: "Target (replaced with)"))
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField(String(localized: "e.g. привет or git"), text: $target)
+                    TextField(String(appLocalized: "e.g. привет or git"), text: $target)
                         .textFieldStyle(.plain)
+                        .multilineTextAlignment(.leading)
                         .font(.system(size: 12.5, weight: .medium, design: .rounded))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
@@ -430,9 +425,8 @@ private struct WordEntrySheet: View {
 
             // Options toggles
             VStack(alignment: .leading, spacing: 8) {
-                Toggle(String(localized: "Switch keyboard layout to target language"), isOn: $switchLayout)
-                    .font(.system(size: 12, weight: .medium))
-                    .controlSize(.small)
+                Toggle(String(appLocalized: "Switch keyboard layout to target language"), isOn: $switchLayout)
+                    .toggleStyle(LeadingSwitchToggleStyle())
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -444,33 +438,30 @@ private struct WordEntrySheet: View {
                         target = ""
                         focusedField = .source
                     } label: {
-                        Label(String(localized: "Clear"), systemImage: "trash")
+                        Label(String(appLocalized: "Clear"), systemImage: "trash")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .tint(.red)
                     .focusable(false)
 
                     Button {
                         autoTranslateSourceToTarget()
                     } label: {
-                        Label(String(localized: "Auto"), systemImage: "wand.and.stars")
+                        Label(String(appLocalized: "Auto"), systemImage: "wand.and.stars")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .disabled(source.trimmingCharacters(in: .whitespaces).isEmpty)
                     .focusable(false)
-                    .help(String(localized: "Auto-translate Source into Target using active layout mapping"))
+                    .help(String(appLocalized: "Auto-translate Source into Target using active layout mapping"))
                 }
 
                 Spacer()
 
                 HStack(spacing: 6) {
                     Button(action: onCancel) {
-                        Label(String(localized: "Cancel"), systemImage: "xmark")
+                        Label(String(appLocalized: "Cancel"), systemImage: "xmark")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .keyboardShortcut(.cancelAction)
                     .focusable(false)
 
@@ -481,10 +472,9 @@ private struct WordEntrySheet: View {
                             switchLayout
                         )
                     } label: {
-                        Label(String(localized: "Save"), systemImage: "checkmark")
+                        Label(String(appLocalized: "Save"), systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                     .keyboardShortcut(.return)
                     .disabled(source.trimmingCharacters(in: .whitespaces).isEmpty ||
                               target.trimmingCharacters(in: .whitespaces).isEmpty)

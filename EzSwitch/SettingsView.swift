@@ -1,807 +1,365 @@
 import SwiftUI
+import ServiceManagement
 
+/// One home for preferences and the two existing rule editors.
 struct SettingsView: View {
-    /// `SettingsManager` is a singleton that owns its own lifetime, so this
-    /// view observes it rather than owning it with `@StateObject`.
+    @ObservedObject private var localization = AppLocalization.shared
+    @ObservedObject private var navigation = SettingsNavigation.shared
     @ObservedObject private var settings = SettingsManager.shared
-    @ObservedObject private var wordStore = WordMapperStore.shared
-    @ObservedObject private var mapperStore = MapperStore.shared
-
+    @ObservedObject private var permissions = PermissionsManager.shared
     @State private var availableLayouts: [LayoutRegistry.Layout] = []
-    @State private var isLoaded = false
-    @State private var hasAccessibility = false
-    @State private var showAboutPopover = false
-    @State private var showHotkeySheet = false
+    @State private var loginStatus = SMAppService.mainApp.status
+    private let permissionTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
-    private let noneOption = Constants.Default.noneLanguage
+    var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+            Divider()
+            VStack(spacing: 0) {
+                if navigation.section == .characters || navigation.section == .words {
+                    editor
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+                            pageHeading
+                            pageContent
+                        }
+                        .padding(SettingsLayout.pageInset)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
+        }
+        .frame(minWidth: 1020, minHeight: 600)
+        .controlSize(.regular)
+        .toggleStyle(LeadingSwitchToggleStyle())
+        .onAppear(perform: refresh)
+        .onChange(of: localization.languageCode) { _, _ in
+            availableLayouts = LayoutRegistry.available()
+        }
+        .onReceive(permissionTimer) { _ in permissions.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 5) {
+                    ForEach(SettingsSection.allCases) { section in
+                        Button {
+                            // Selecting a section keeps the editor's remembered pair.
+                            navigation.requestedFromLayout = nil
+                            navigation.requestedToLayout = nil
+                            navigation.section = section
+                        } label: {
+                            HStack(alignment: .top, spacing: 11) {
+                                Image(systemName: section.icon)
+                                    .font(.system(size: 18, weight: .regular))
+                                    .frame(width: 24, height: 24)
+                                    .foregroundStyle(navigation.section == section ? Color.accentColor : .secondary)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(section.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(section.subtitle)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(navigation.section == section ? Color.accentColor.opacity(0.13) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 9))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .focusEffectDisabled()
+                        .accessibilityAddTraits(navigation.section == section ? .isSelected : [])
+                    }
+                }
+                .padding(.top, 10)
+                .padding(.horizontal, 10)
+            }
+
+            Divider().padding(.horizontal, 20)
+            VStack(alignment: .leading, spacing: 8) {
+                Label(statusTitle, systemImage: statusIcon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(statusColor)
+            }
+            .padding(16)
+        }
+        .frame(width: 230)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private var statusTitle: String {
+        if !permissions.allGranted { return String(appLocalized: "Permissions required") }
+        if settings.isPaused { return String(appLocalized: "Paused") }
+        if !settings.commandSwitchEnabled && !settings.enableTransformKey && !settings.enableWordSubstitution {
+            return String(appLocalized: "All features are off")
+        }
+        return String(appLocalized: "Ready")
+    }
+
+    private var statusIcon: String {
+        !permissions.allGranted ? "exclamationmark.circle" : (settings.isPaused ? "pause.circle" : "checkmark.circle")
+    }
+
+    private var statusColor: Color {
+        !permissions.allGranted ? .orange : .primary
+    }
+
+    private var pageHeading: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(navigation.section.title).font(.system(size: 27, weight: .bold))
+            Text(pageSubtitle).font(.system(size: 13)).foregroundStyle(.secondary)
+        }
+    }
+
+    private var pageSubtitle: String {
+        if navigation.section == .characters || navigation.section == .words {
+            return String(appLocalized: "Rules belong to the selected pair. Your switch-key assignments stay unchanged.")
+        }
+        return navigation.section.subtitle
+    }
+
+    @ViewBuilder private var pageContent: some View {
+        switch navigation.section {
+        case .general: generalPage
+        case .switching: switchingPage
+        case .transformation: transformationPage
+        case .permissions: permissionsPage
+        case .about: aboutPage
+        case .characters, .words: EmptyView()
+        }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            pageHeading
+            MapperSettingsView(
+                initialMode: navigation.section == .characters ? .character : .word,
+                initialFromLayout: navigation.requestedFromLayout,
+                initialToLayout: navigation.requestedToLayout
+            )
+            .id("\(navigation.section.rawValue)-\(navigation.editorRequest)")
+        }
+        .padding(SettingsLayout.pageInset)
+    }
+
+    private var generalPage: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            SettingsGroup(title: String(appLocalized: "Startup")) {
+                Toggle(String(appLocalized: "Launch at login"), isOn: $settings.launchAtLogin)
+                    .toggleStyle(LeadingSwitchToggleStyle())
+                    .onChange(of: settings.launchAtLogin) { _, _ in loginStatus = SMAppService.mainApp.status }
+                Text(String(appLocalized: "EzSwitch runs in the menu bar without a Dock icon."))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                if loginStatus == .requiresApproval {
+                    Text(String(appLocalized: "Allow EzSwitch in Login Items to finish enabling startup."))
+                        .font(.system(size: 12)).foregroundStyle(.orange)
+                    Button(String(appLocalized: "Open Login Items")) { SMAppService.openSystemSettingsLoginItems() }
+                } else if settings.launchAtLogin && loginStatus != .enabled {
+                    Text(String(appLocalized: "Startup is not enabled in macOS. Check Login Items."))
+                        .font(.system(size: 12)).foregroundStyle(.orange)
+                    Button(String(appLocalized: "Open Login Items")) { SMAppService.openSystemSettingsLoginItems() }
+                }
+            }
+            Divider()
+            SettingsGroup(title: String(appLocalized: "Interface")) {
+                PreferenceRow(title: String(appLocalized: "App language")) {
+                    SettingsPicker(String(appLocalized: "App language"), selection: $settings.interfaceLanguage,
+                                   options: AppLanguage.allCases.map { ($0, $0.title) })
+                }
+                Text(String(appLocalized: "Interface language does not change your keyboard layouts."))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var switchingPage: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            Toggle(String(appLocalized: "Enable layout switching"), isOn: $settings.commandSwitchEnabled)
+                .toggleStyle(LeadingSwitchToggleStyle())
+            SettingsGroup(title: String(appLocalized: "Switch keys")) {
+                PreferenceRow(title: String(appLocalized: "Modifier key")) {
+                    SettingsPicker(String(appLocalized: "Modifier key"), selection: $settings.switchModifier,
+                                   options: SwitchModifier.allCases.map { ($0, $0.displayName) })
+                }
+                Text(String(appLocalized: "Tap a modifier on its own to switch layouts. Hold it with another key to use normal shortcuts."))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Divider().padding(.vertical, 6)
+                layoutRow(title: String(appLocalized: "Left key"), selection: $settings.leftCommandLayout)
+                layoutRow(title: String(appLocalized: "Right key"), selection: $settings.rightCommandLayout)
+            }
+            .disabled(!settings.commandSwitchEnabled)
+            Divider()
+            SettingsGroup(title: String(appLocalized: "Rules for this pair")) {
+                Text(pairTitle).font(.system(size: 13, weight: .medium))
+                HStack(spacing: 12) {
+                    Button(String(appLocalized: "Character Mappings")) { openEditor(.characters) }
+                    Button(String(appLocalized: "Word Substitutions")) { openEditor(.words) }
+                }
+            }
+        }
+    }
+
+    private var transformationPage: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            Toggle(String(appLocalized: "Enable text transformation"), isOn: $settings.enableTransformKey)
+                .toggleStyle(LeadingSwitchToggleStyle())
+            SettingsGroup(title: String(appLocalized: "Shortcut")) {
+                PreferenceRow(title: String(appLocalized: "Double-tap key")) {
+                    SettingsPicker(String(appLocalized: "Double-tap key"), selection: $settings.transformKeyType,
+                                   options: TransformKeyType.allCases.map { ($0, "\($0.isShift ? "⇧" : "⌥")  \($0.displayName)") })
+                }
+                Text(String(appLocalized: "Correct selected text or the last typed word, for example ghbdtn → привет."))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            .disabled(!settings.enableTransformKey)
+            Divider()
+            SettingsGroup(title: String(appLocalized: "Behavior")) {
+                Toggle(String(appLocalized: "Switch to the result layout after correction"), isOn: $settings.switchLayoutAfterTransform)
+                Toggle(String(appLocalized: "Do not pass the double tap to other apps"), isOn: $settings.suppressTransformKey)
+                Text(String(appLocalized: "Prevents the same double tap from opening actions such as Search Everywhere in JetBrains IDEs."))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .toggleStyle(LeadingSwitchToggleStyle())
+            .disabled(!settings.enableTransformKey)
+            Divider()
+            Button(String(appLocalized: "Edit character mappings…")) { openEditor(.characters) }
+        }
+    }
+
+    private var permissionsPage: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            permissionRow(
+                title: String(appLocalized: "Accessibility"),
+                description: String(appLocalized: "Allows EzSwitch to replace and correct text in other apps."),
+                granted: permissions.isAccessibilityGranted,
+                action: permissions.openSecurityPreferences
+            )
+            Divider()
+            permissionRow(
+                title: String(appLocalized: "Input Monitoring"),
+                description: String(appLocalized: "Allows EzSwitch to detect your switch keys and shortcuts."),
+                granted: permissions.isInputMonitoringGranted,
+                action: permissions.openInputMonitoringPreferences
+            )
+            Divider()
+            Text(String(appLocalized: "After granting permissions, restart the application."))
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Button(String(appLocalized: "Check again")) { permissions.refresh() }
+                Button(String(appLocalized: "Restart"), action: AppActions.restart)
+            }
+        }
+    }
+
+    private var aboutPage: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+            HStack(spacing: 18) {
+                if let icon = NSImage(named: "AppIcon") {
+                    Image(nsImage: icon).resizable().frame(width: 72, height: 72)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(verbatim: "EzSwitch").font(.system(size: 22, weight: .semibold))
+                    Text(String(appLocalized: "Version \(appVersion)"))
+                    Text(String(appLocalized: "Build \(appBuild)"))
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                }
+            }
+            Text(String(appLocalized: "Keyboard layout switching, text correction and a dictionary that learns your words."))
+                .foregroundStyle(.secondary)
+            Divider()
+            LabeledContent(String(appLocalized: "Author:"), value: "AlexReL")
+            Link(destination: Constants.Link.repository) {
+                Label(String(appLocalized: "View on GitHub"), systemImage: "arrow.up.right.square")
+            }
+            Text(verbatim: "© 2026 AlexReL · MIT License").font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
     }
-
     private var appBuild: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        if let hash = Bundle.main.infoDictionary?["GitCommitHash"] as? String { return "\(build) · \(hash)" }
+        return build
     }
-
-    private var gitCommitHash: String? {
-        Bundle.main.infoDictionary?["GitCommitHash"] as? String
+    private var pairTitle: String {
+        "\(LayoutRegistry.displayName(forID: settings.leftCommandLayout)) ↔ \(LayoutRegistry.displayName(forID: settings.rightCommandLayout))"
     }
-
-    /// Picker rows for the switcher pair: `LayoutRegistry.Layout` values whose
-    /// `id` is what gets stored and whose `label` is what gets shown. Either
-    /// key may be bound to nothing, so "—" stays in the list.
     private var layoutOptions: [LayoutRegistry.Layout] {
-        LayoutRegistry.switcherOptions(
-            availableLayouts,
-            including: [settings.leftCommandLayout, settings.rightCommandLayout]
-        )
+        LayoutRegistry.switcherOptions(availableLayouts, including: [settings.leftCommandLayout, settings.rightCommandLayout])
     }
 
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.93, green: 0.95, blue: 1.0),
-                    Color(red: 0.96, green: 0.97, blue: 0.99)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+    private func layoutRow(title: String, selection: Binding<String>) -> some View {
+        PreferenceRow(title: title) {
+            SettingsPicker(title, selection: selection, options: layoutOptions.map { ($0.id, $0.label) })
+        }
+    }
 
-            VStack(spacing: 8) {
-                // Compact header
-                HStack(spacing: 9) {
-                    if let appIcon = NSImage(named: "AppIcon") {
-                        Image(nsImage: appIcon)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 28, height: 28)
-                            .cornerRadius(6)
-                            .shadow(color: Color.black.opacity(0.12), radius: 2, x: 0, y: 1)
-                    } else {
-                        Image(systemName: "keyboard")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.blue)
-                            .frame(width: 28, height: 28)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(6)
-                    }
-
-                    Text(String(localized: "EzSwitch Settings"))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-
-                    Spacer()
-
-                    Button {
-                        showAboutPopover.toggle()
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .help(String(localized: "About EzSwitch"))
-                    .popover(isPresented: $showAboutPopover, arrowEdge: .bottom) {
-                        aboutPopoverContent
-                    }
-
-                    Circle()
-                        .fill(hasAccessibility ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
-                        .help(hasAccessibility ? String(localized: "Permissions granted") : String(localized: "Permissions required"))
-                }
-                .padding(.top, 4)
-
-                // Cards laid out in a VStack so the popover sizes to natural content height
-                VStack(spacing: 8) {
-                    if !hasAccessibility {
-                        permissionCard
-                    }
-
-                    // Layout Switch card
-                    SettingsCard(icon: switchModifierIcon, title: String(localized: "Layout Switch"), color: .blue) {
-                        VStack(spacing: 6) {
-                            Toggle(String(localized: "Enable"), isOn: $settings.commandSwitchEnabled)
-                                .toggleStyle(CompactToggleStyle(tint: .blue))
-
-                            if settings.commandSwitchEnabled {
-                                VStack(spacing: 6) {
-                                    modifierRow
-                                    HStack(spacing: 8) {
-                                        compactLanguagePicker(
-                                            icon: "arrow.left",
-                                            title: String(localized: "Left"),
-                                            selection: $settings.leftCommandLayout
-                                        )
-                                        compactLanguagePicker(
-                                            icon: "arrow.right",
-                                            title: String(localized: "Right"),
-                                            selection: $settings.rightCommandLayout
-                                        )
-                                    }
-                                }
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .top).combined(with: .opacity),
-                                    removal: .move(edge: .top).combined(with: .opacity)
-                                ))
-                            }
-                        }
-                    }
-
-                    // Text Transformation card
-                    SettingsCard(icon: "textformat", title: String(localized: "Text Transformation"), color: .purple) {
-                        VStack(spacing: 6) {
-                            Toggle(String(localized: "Enable"), isOn: $settings.enableTransformKey)
-                                .toggleStyle(CompactToggleStyle(tint: .purple))
-
-                            if settings.enableTransformKey {
-                                VStack(spacing: 6) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "key.fill")
-                                            .foregroundColor(.purple)
-                                            .font(.system(size: 11))
-                                            .frame(width: 14)
-                                        Text(String(localized: "Key"))
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                        Picker("", selection: $settings.transformKeyType) {
-                                            ForEach(TransformKeyType.allCases, id: \.self) { keyType in
-                                                Text(keyType.displayName).tag(keyType)
-                                            }
-                                        }
-                                        .labelsHidden()
-                                        .pickerStyle(.menu)
-                                        .controlSize(.small)
-                                        .focusable(false)
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                            .fill(Color.primary.opacity(0.035))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
-                                            )
-                                    )
-
-                                    HStack(spacing: 12) {
-                                        Toggle(String(localized: "Suppress in apps"), isOn: $settings.suppressTransformKey)
-                                            .toggleStyle(CompactToggleStyle(tint: .purple))
-                                        Spacer()
-                                        Toggle(String(localized: "Switch layout after"), isOn: $settings.switchLayoutAfterTransform)
-                                            .toggleStyle(CompactToggleStyle(tint: .purple))
-                                    }
-                                    .font(.system(size: 11))
-
-                                    if settings.suppressTransformKey {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "info.circle")
-                                                .foregroundColor(.orange)
-                                                .font(.system(size: 10))
-                                            Text(String(localized: "Blocks double Shift/Option in PHPStorm etc."))
-                                                .font(.system(size: 10))
-                                                .foregroundColor(.secondary)
-                                                .lineLimit(1)
-                                                .truncationMode(.tail)
-                                        }
-                                    }
-                                }
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .top).combined(with: .opacity),
-                                    removal: .move(edge: .top).combined(with: .opacity)
-                                ))
-                            }
-
-                            Divider().opacity(0.3)
-
-                            HStack {
-                                Image(systemName: "keyboard.badge.ellipsis")
-                                    .foregroundColor(.purple)
-                                    .font(.system(size: 12))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(String(localized: "Character Mappings"))
-                                        .font(.system(size: 12, weight: .medium))
-                                    Text(currentMapperInfo)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                }
-                                Spacer()
-                                Button(action: openMappersWindow) {
-                                    HStack(spacing: 3) {
-                                        Text(String(localized: "Open"))
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 8, weight: .bold))
-                                    }
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.purple)
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(Color.purple.opacity(0.12))
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .focusable(false)
-                            }
-
-                            presetPickerView
-                        }
-                    }
-
-                    // Word Substitutions card
-                    SettingsCard(icon: "text.badge.checkmark", title: String(localized: "Word Substitutions"), color: .indigo) {
-                        VStack(spacing: 6) {
-                            Toggle(String(localized: "Auto-replace"), isOn: $settings.enableWordSubstitution)
-                                .toggleStyle(CompactToggleStyle(tint: .indigo))
-
-                            HStack {
-                                Image(systemName: "character.book.closed")
-                                    .foregroundColor(.indigo)
-                                    .font(.system(size: 12))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(currentWordSubstitutionInfo)
-                                        .font(.system(size: 11, weight: .medium))
-                                    Button {
-                                        showHotkeySheet = true
-                                    } label: {
-                                        HStack(spacing: 5) {
-                                            Text(String(localized: "Quick remember:"))
-                                                .font(.system(size: 10))
-                                                .foregroundColor(.secondary)
-                                            KeycapsView(tokens: settings.wordRememberHotkey.displayTokens, scale: .small)
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .focusable(false)
-                                    .help(String(localized: "Change hotkey for remembering words"))
-                                }
-                                Spacer()
-                                Button(action: openWordsWindow) {
-                                    HStack(spacing: 3) {
-                                        Text(String(localized: "Open"))
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 8, weight: .bold))
-                                    }
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.indigo)
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(Color.indigo.opacity(0.12))
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .focusable(false)
-                            }
-                        }
-                    }
-
-                    // System card
-                    SettingsCard(icon: "gearshape.2", title: String(localized: "System"), color: .green) {
-                        VStack(spacing: 6) {
-                            HStack {
-                                Image(systemName: "power")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: 12))
-                                Text(String(localized: "Launch at login"))
-                                    .font(.system(size: 12))
-                                Spacer()
-                                Toggle("", isOn: $settings.launchAtLogin)
-                                    .toggleStyle(CompactToggleStyle(tint: .green))
-                                    .labelsHidden()
-                            }
-                        }
-                    }
-
-                    // Action buttons row
-                    HStack(spacing: 8) {
-                        Button(action: restartApplication) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 10, weight: .semibold))
-                                Text(String(localized: "Restart"))
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundColor(.blue)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Color.blue.opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                            .stroke(Color.blue.opacity(0.18), lineWidth: 0.5)
-                                    )
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .focusable(false)
-
-                        Button(action: {
-                            NSApplication.shared.terminate(nil)
-                        }) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "power")
-                                    .font(.system(size: 10, weight: .semibold))
-                                Text(String(localized: "Quit"))
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundColor(.red)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Color.red.opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                            .stroke(Color.red.opacity(0.18), lineWidth: 0.5)
-                                    )
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .focusable(false)
-                    }
-
-                    // Footer: version + author
-                    HStack(spacing: 6) {
-                        Button {
-                            showAboutPopover.toggle()
-                        } label: {
-                            HStack(spacing: 5) {
-                                Text("EzSwitch v\(appVersion)")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text("•")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary.opacity(0.5))
-                                Text("by AlexReL")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .focusable(false)
-
-                        Spacer()
-
-                        Button {
-                            NSWorkspace.shared.open(Constants.Link.repository)
-                        } label: {
-                            HStack(spacing: 3) {
-                                Text("GitHub")
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 8, weight: .semibold))
-                            }
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.blue.opacity(0.85))
-                        }
-                        .buttonStyle(.plain)
-                        .focusable(false)
-                    }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 2)
-                }
+    private func permissionRow(title: String, description: String, granted: Bool, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(title).font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Label(granted ? String(appLocalized: "Granted") : String(appLocalized: "Not granted"),
+                      systemImage: granted ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .foregroundStyle(granted ? .green : .orange).font(.system(size: 12))
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
-        }
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear {
-            if !isLoaded {
-                isLoaded = true
-                reloadAvailableLayouts()
-                checkPermissions()
-            }
-        }
-        .sheet(isPresented: $showHotkeySheet) {
-            HotkeyRecorderView(
-                hotkey: $settings.wordRememberHotkey,
-                actionName: String(localized: "Remember Word"),
-                onClose: { showHotkeySheet = false }
-            )
+            Text(description).font(.system(size: 12)).foregroundStyle(.secondary)
+            Button(String(appLocalized: "Open System Settings"), action: action)
         }
     }
 
-    // MARK: - About Popover
-
-    private var aboutPopoverContent: some View {
-        VStack(spacing: 10) {
-            if let appIcon = NSImage(named: "AppIcon") {
-                Image(nsImage: appIcon)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 48, height: 48)
-                    .cornerRadius(11)
-                    .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
-            } else {
-                Image(systemName: "keyboard.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(.blue)
-                    .frame(width: 48, height: 48)
-                    .background(Color.blue.opacity(0.12))
-                    .cornerRadius(11)
-            }
-
-            VStack(spacing: 3) {
-                Text("EzSwitch")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                Text("Version \(appVersion)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.primary.opacity(0.85))
-                HStack(spacing: 4) {
-                    Text("Build \(appBuild)")
-                    if let hash = gitCommitHash, !hash.isEmpty {
-                        Text("•")
-                            .foregroundColor(.secondary.opacity(0.4))
-                        Text(hash)
-                    }
-                }
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary)
-            }
-
-            Divider()
-
-            VStack(spacing: 5) {
-                HStack(spacing: 4) {
-                    Text(String(localized: "Author:"))
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    Text("AlexReL")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-
-                Button {
-                    NSWorkspace.shared.open(Constants.Link.repository)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "link")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(Constants.Link.repositoryDisplay)
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(Color.blue.opacity(0.1))
-                    )
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-            }
-
-            Text("© 2026 AlexReL · MIT License")
-                .font(.system(size: 9.5))
-                .foregroundColor(.secondary.opacity(0.8))
-                .padding(.top, 2)
-        }
-        .padding(16)
-        .frame(width: 250)
+    private func openEditor(_ section: SettingsSection) {
+        navigation.open(section, usingSwitchPair: true)
     }
 
-    // MARK: - Sub-views
-
-    private var modifierRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "hand.point.up.left.fill")
-                .foregroundColor(.blue)
-                .font(.system(size: 11))
-                .frame(width: 14)
-            Text(String(localized: "Key"))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary)
-            Spacer()
-            Picker("", selection: $settings.switchModifier) {
-                ForEach(SwitchModifier.allCases, id: \.self) { mod in
-                    Text(mod.displayName).tag(mod)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .focusable(false)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.primary.opacity(0.035))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
-                )
-        )
-    }
-
-    @ViewBuilder
-    private var presetPickerView: some View {
-        let presets = availablePresetsForCurrentPair
-        if !presets.isEmpty {
-            HStack(spacing: 6) {
-                Image(systemName: "list.bullet.rectangle.portrait")
-                    .foregroundColor(.purple)
-                    .font(.system(size: 11))
-                    .frame(width: 14)
-                Text(String(localized: "Preset"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                Spacer(minLength: 2)
-                Picker("", selection: presetSelectionBinding) {
-                    ForEach(presets, id: \.id) { p in
-                        Text(p.name).tag(p.id)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
-                .focusable(false)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(0.035))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
-                    )
-            )
-        }
-    }
-
-    /// Separate binding to avoid Swift compiler "unable to type-check" with inline closures.
-    private var presetSelectionBinding: Binding<String> {
-        let left = settings.leftCommandLayout
-        let right = settings.rightCommandLayout
-        let presets = availablePresetsForCurrentPair
-        return Binding(
-            get: {
-                if let saved = settings.selectedPresetId(for: left, right),
-                   presets.contains(where: { $0.id == saved }) {
-                    return saved
-                }
-                return presets.first?.id ?? ""
-            },
-            set: { settings.setSelectedPresetId($0, for: left, right) }
-        )
-    }
-
-    private var switchModifierIcon: String {
-        switch settings.switchModifier {
-        case .command: return "command"
-        case .option:  return "option"
-        }
-    }
-
-    // MARK: - Permission card
-
-    private var permissionCard: some View {
-        SettingsCard(icon: "exclamationmark.shield.fill", title: String(localized: "Permissions required"), color: .red) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(String(localized: "Universal Access permission is required."))
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-
-                Button(action: {
-                    PermissionsManager.shared.openSecurityPreferences()
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "gear")
-                        Text(String(localized: "Open System Settings"))
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(LinearGradient(
-                        gradient: Gradient(colors: [.orange, .red]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-            }
-        }
-    }
-
-    // MARK: - Compact language picker (in a 2-column layout)
-
-    private func compactLanguagePicker(icon: String, title: String, selection: Binding<String>) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .foregroundColor(.blue)
-                .font(.system(size: 10, weight: .semibold))
-                .frame(width: 14)
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary)
-            Spacer(minLength: 2)
-            Picker("", selection: selection) {
-                ForEach(layoutOptions) { layout in
-                    // Tag is the stable id, label is the localized name — a
-                    // stored id has to survive a language change, a name can't.
-                    Text(layout.label).tag(layout.id)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .focusable(false)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.primary.opacity(0.035))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
-                )
-        )
-    }
-
-    // MARK: - Helpers
-
-    private func checkPermissions() {
-        hasAccessibility = PermissionsManager.shared.isAccessibilityGranted
-    }
-
-    private var availablePresetsForCurrentPair: [LayoutMapperPreset] {
-        let left = settings.leftCommandLayout
-        let right = settings.rightCommandLayout
-        guard left != Constants.Default.noneLanguage, right != Constants.Default.noneLanguage else { return [] }
-        let pair = LayoutPair(from: left, to: right)
-        return MapperStore.shared.presets(for: pair)
-    }
-
-    private var currentMapperInfo: String {
-        let left = settings.leftCommandLayout
-        let right = settings.rightCommandLayout
-        if left == Constants.Default.noneLanguage || right == Constants.Default.noneLanguage {
-            return String(localized: "Pick a pair of languages")
-        }
-        let pair = LayoutPair(from: left, to: right)
-        let presets = MapperStore.shared.presets(for: pair)
-        if presets.isEmpty {
-            return String(localized: "No mapping for this pair")
-        }
-        // Prefer the preset the user explicitly picked for this pair.
-        let active = settings.selectedPresetId(for: left, right)
-            .flatMap { id in presets.first(where: { $0.id == id }) }
-            ?? presets.first
-        if let preset = active {
-            return String(localized: "\(preset.name) — \(preset.mappingCount) chars")
-        }
-        return String(localized: "No mapping for this pair")
-    }
-
-    private var currentWordSubstitutionInfo: String {
-        let left = settings.leftCommandLayout
-        let right = settings.rightCommandLayout
-        if left == noneOption || right == noneOption {
-            return String(localized: "Pick a pair of languages")
-        }
-        let pair = LayoutPair(from: left, to: right)
-        let count = wordStore.entries(for: pair).count
-        if count == 0 {
-            return String(localized: "No words saved yet")
-        }
-        return String.localizedStringWithFormat(
-            NSLocalizedString("%d words for current pair", comment: ""),
-            count
-        )
-    }
-
-    private func openMappersWindow() {
-        MapperWindowController.shared.showWindow(mode: .character)
-    }
-
-    private func openWordsWindow() {
-        MapperWindowController.shared.showWindow(mode: .word)
-    }
-
-    /// Re-read the enabled layouts. The picker merges this list with whatever
-    /// is already configured, so a layout switched off in System Settings
-    /// stays visible instead of silently disappearing from the selection.
-    private func reloadAvailableLayouts() {
+    private func refresh() {
+        permissions.refresh()
         availableLayouts = LayoutRegistry.available()
-    }
-
-    private func restartApplication() {
-        let appURL = Bundle.main.bundleURL
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = [appURL.path]
-        try? task.run()
-        NSApplication.shared.terminate(nil)
+        loginStatus = SMAppService.mainApp.status
     }
 }
 
-// MARK: - SettingsCard (compact version)
-
-struct SettingsCard<Content: View>: View {
-    let icon: String
+private struct SettingsGroup<Content: View>: View {
+    @ObservedObject private var localization = AppLocalization.shared
     let title: String
-    let color: Color
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(color.opacity(0.12))
-                        .frame(width: 24, height: 24)
-                    Image(systemName: icon)
-                        .foregroundColor(color)
-                        .font(.system(size: 12, weight: .semibold))
-                }
-
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(.primary)
-
-                Spacer()
-            }
-
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title).font(.system(size: 14, weight: .semibold)).padding(.bottom, 2)
             content()
         }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .stroke(Color.black.opacity(0.04), lineWidth: 0.5)
-                )
-                .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 1.5)
-        )
     }
 }
 
-// MARK: - Compact Toggle Style
+private struct PreferenceRow<Control: View>: View {
+    @ObservedObject private var localization = AppLocalization.shared
+    let title: String
+    @ViewBuilder let control: () -> Control
 
-struct CompactToggleStyle: ToggleStyle {
-    var tint: Color = .green
-
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 0) {
-            configuration.label
-            Spacer()
-            ZStack {
-                Capsule()
-                    .fill(configuration.isOn ? tint : Color(NSColor.separatorColor).opacity(0.35))
-                    .frame(width: 32, height: 18)
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 14, height: 14)
-                    .shadow(color: Color.black.opacity(0.18), radius: 1.5, x: 0, y: 1)
-                    .offset(x: configuration.isOn ? 7 : -7)
-                    .animation(.spring(response: 0.22, dampingFraction: 0.8), value: configuration.isOn)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
-                    configuration.isOn.toggle()
-                }
-            }
+    var body: some View {
+        HStack(spacing: 20) {
+            Text(title).font(.system(size: 13))
+            Spacer(minLength: 16)
+            control()
+                .frame(width: SettingsLayout.controlWidth)
         }
-        .focusable(false)
+        .frame(minHeight: 26)
     }
 }

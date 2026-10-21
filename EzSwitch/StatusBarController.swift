@@ -1,11 +1,13 @@
 import Cocoa
 import OSLog
 import SwiftUI
+import Combine
 
 class StatusBarController: NSObject {
     private var statusBar: NSStatusBar
     private var statusItem: NSStatusItem
     private var popover: NSPopover
+    private var observations = Set<AnyCancellable>()
     
     override init() {
         statusBar = NSStatusBar.system
@@ -14,17 +16,36 @@ class StatusBarController: NSObject {
         
         // Configure popover size and behavior
         // Height is the *minimum* preferred size; SwiftUI can grow it with fixedSize
-        popover.contentSize = NSSize(width: 420, height: 200)
+        popover.contentSize = NSSize(width: 360, height: 360)
         popover.behavior = .transient
-        
-        // Create ViewController with settings
-        let settingsVC = NSHostingController(rootView: SettingsView())
-        popover.contentViewController = settingsVC
+        // Let the same SwiftUI background fill the native arrow region.
+        // Foreground controls remain inside the popover's safe area.
+        popover.hasFullSizeContent = true
         
         super.init()
+
+        popover.contentViewController = NSHostingController(rootView: LocalizedContent {
+            QuickControlsView { [weak self] section, usePair in
+                self?.popover.performClose(nil)
+                SettingsWindowController.shared.showWindow(section: section, usingSwitchPair: usePair)
+            }
+        })
         
         // Configure status bar
         setupStatusBar()
+
+        SettingsManager.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateTooltip() }
+            .store(in: &observations)
+        PermissionsManager.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateTooltip() }
+            .store(in: &observations)
+        AppLocalization.shared.$languageCode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateTooltip() }
+            .store(in: &observations)
     }
     
     private func setupStatusBar() {
@@ -57,27 +78,34 @@ class StatusBarController: NSObject {
         guard let button = statusItem.button else { return }
         
         let settings = SettingsManager.shared
-        let accessibility = AXIsProcessTrusted()
+        let permissions = PermissionsManager.shared
         
-        var status = String(localized: "EzSwitch") + "\n"
-        status += accessibility ? String(localized: "✅ Access granted") : String(localized: "❌ Permissions required")
+        var status = String(appLocalized: "EzSwitch") + "\n"
+        if !permissions.allGranted {
+            status += String(appLocalized: "Permissions required")
+        } else if settings.isPaused {
+            status += String(appLocalized: "Paused")
+        } else if !settings.commandSwitchEnabled && !settings.enableTransformKey && !settings.enableWordSubstitution {
+            status += String(appLocalized: "All features are off")
+        } else {
+            status += String(appLocalized: "Ready")
+        }
         
         if settings.commandSwitchEnabled {
             status += "\n\n\(settings.switchModifier.displayName):"
             if settings.leftCommandLayout != Constants.Default.noneLanguage {
-                status += "\n  Left → \(LayoutRegistry.displayName(forID: settings.leftCommandLayout))"
+                status += "\n  \(String(appLocalized: "Left key")) → \(LayoutRegistry.displayName(forID: settings.leftCommandLayout))"
             }
             if settings.rightCommandLayout != Constants.Default.noneLanguage {
-                status += "\n  Right → \(LayoutRegistry.displayName(forID: settings.rightCommandLayout))"
+                status += "\n  \(String(appLocalized: "Right key")) → \(LayoutRegistry.displayName(forID: settings.rightCommandLayout))"
             }
         }
         
         if settings.enableTransformKey {
-            let icon = settings.transformKeyType.isShift ? "⇧" : "⌥"
-            status += "\n\n\(icon) \(settings.transformKeyType.shortName) → Transformation"
+            status += "\n\n\(settings.transformKeyType.displayName) → \(String(appLocalized: "Text Transformation"))"
         }
         
-        status += "\n\n" + String(localized: "Click for settings")
+        status += "\n\n" + String(appLocalized: "Click for quick controls")
         
         button.toolTip = status
     }
@@ -91,9 +119,8 @@ class StatusBarController: NSObject {
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            // Update contentViewController when opening
-            let settingsVC = NSHostingController(rootView: SettingsView())
-            popover.contentViewController = settingsVC
+            PermissionsManager.shared.refresh()
+            updateTooltip()
             
             // Show popover
             popover.show(relativeTo: button.bounds,

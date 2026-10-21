@@ -60,19 +60,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showAccessibilityAlert() {
         let alert = NSAlert()
-        alert.messageText = String(localized: "Permission Required")
+        alert.messageText = String(appLocalized: "Permission Required")
         
         let informativeText = NSTextField(wrappingLabelWithString: """
-        \(String(localized: "EzSwitch requires the following permissions:"))
+        \(String(appLocalized: "EzSwitch requires the following permissions:"))
         
-        \(String(localized: "1) Input Monitoring — to detect double Shift and single Cmd taps"))
-        \(String(localized: "2) Accessibility — to transform selected text"))
+        \(String(appLocalized: "1) Input Monitoring — to detect double Shift and single Cmd taps"))
+        \(String(appLocalized: "2) Accessibility — to transform selected text"))
         
-        \(String(localized: "Add EzSwitch to:"))
-        • \(String(localized: "System Settings → Privacy & Security → Input Monitoring"))
-        • \(String(localized: "System Settings → Privacy & Security → Accessibility"))
+        \(String(appLocalized: "Add EzSwitch to:"))
+        • \(String(appLocalized: "System Settings → Privacy & Security → Input Monitoring"))
+        • \(String(appLocalized: "System Settings → Privacy & Security → Accessibility"))
         
-        \(String(localized: "After granting permissions, restart the application."))
+        \(String(appLocalized: "After granting permissions, restart the application."))
         """)
         informativeText.alignment = .natural
         informativeText.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
@@ -82,8 +82,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         alert.accessoryView = informativeText
         alert.alertStyle = .warning
-        alert.addButton(withTitle: String(localized: "Open Settings"))
-        alert.addButton(withTitle: String(localized: "Later"))
+        alert.addButton(withTitle: String(appLocalized: "Open Settings"))
+        alert.addButton(withTitle: String(appLocalized: "Later"))
 
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {

@@ -9,9 +9,28 @@ TESTS_DIR="/tmp/ezswitch-tests"
 mkdir -p "$TESTS_DIR"
 cp scripts/LogicTests.swift "$TESTS_DIR/main.swift"
 
+# Exercise live lookups against the shipped catalogs rather than mocked strings.
+TEST_RESOURCES="$TESTS_DIR/LocalizationTests.bundle/Contents/Resources"
+mkdir -p "$TEST_RESOURCES"
+cat > "$TESTS_DIR/LocalizationTests.bundle/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>EzSwitch.LocalizationTests</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+</dict></plist>
+PLIST
+for language in en ru uk he; do
+    cp -R "EzSwitch/$language.lproj" "$TEST_RESOURCES/"
+done
+
 swiftc -O \
+    -module-cache-path "$TESTS_DIR/module-cache" \
+    EzSwitch/AppLanguage.swift \
+    EzSwitch/AppLocalization.swift \
     EzSwitch/Constants.swift \
     EzSwitch/LayoutRegistry.swift \
+    EzSwitch/TransformSourceDetection.swift \
     EzSwitch/Mappers/KeyboardLayoutUtility.swift \
     EzSwitch/Mappers/LayoutMapperPreset.swift \
     EzSwitch/Mappers/LayoutMapperPreset+Transform.swift \

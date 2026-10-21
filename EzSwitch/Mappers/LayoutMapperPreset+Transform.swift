@@ -1,132 +1,119 @@
 import Foundation
 
-/// Direction-aware application of a single preset's character map.
-///
-/// The reverse direction needs longest-match over multi-character targets
-/// (`й` → `"QQ"` must invert from `"QQ"`, not from `Q`), so it is built once
-/// in the initializer and then applied in a single left-to-right pass.
+/// Compiles a preset once per conversion, with explicit extra rules taking
+/// priority over regular key mappings in both directions.
 struct LayoutMappingApplication {
-    private let charMap: [Character: String]
-    private let multiPatterns: [(pattern: String, replacement: String)]
+    private let forward: TextReplacements
+    private let reverse: TextReplacements
 
-    init(forward: [Character: String]) {
-        var charMap: [Character: String] = [:]
-        var patterns: [(String, String)] = []
-        for (source, target) in forward {
-            if target.count == 1, let first = target.first {
-                charMap[first] = String(source)
-            } else {
-                patterns.append((target, String(source)))
-            }
+    init(preset: LayoutMapperPreset) {
+        var rules: [String: String] = [:]
+        for (source, target) in preset.mapping where !target.isEmpty {
+            guard let character = source.first else { continue }
+            rules[String(character)] = target
         }
-        // A character that starts a multi-char pattern must not also be
-        // replaced by the single-char map — longest match wins.
-        for start in Set(patterns.map { $0.0.first! }) {
-            charMap.removeValue(forKey: start)
+        let extras = preset.extraMappings.filter { !$0.source.isEmpty && !$0.target.isEmpty }
+        for extra in extras { rules[extra.source] = extra.target }
+        forward = TextReplacements(rules)
+
+        // Sort the ordinary rules to make ambiguous inverses deterministic.
+        // Explicit extras win collisions with ordinary target characters.
+        var inverse: [String: String] = [:]
+        for source in rules.keys.sorted() { inverse[rules[source]!] = source }
+        for extra in extras where rules[extra.source] == extra.target {
+            inverse[extra.target] = extra.source
         }
-        patterns.sort { $0.0.count > $1.0.count }
-        self.charMap = charMap
-        self.multiPatterns = patterns
+        reverse = TextReplacements(inverse)
     }
 
-    /// Invert the forward map and apply it: single chars map directly, longer
-    /// targets are matched greedily longest-first.
-    func inverted(_ text: String) -> String {
+    func applying(_ text: String) -> String { forward.apply(text) }
+    func inverted(_ text: String) -> String { reverse.apply(text) }
+    var reversedCharacters: [Character: String] { reverse.characters }
+    func forwardPatternScore(_ text: String) -> Int { forward.patternScore(text) }
+    func reversePatternScore(_ text: String) -> Int { reverse.patternScore(text) }
+}
+
+/// Longest-match replacement in one pass. Replacement output is never fed
+/// back into another rule, so explicit targets cannot cascade or loop.
+private struct TextReplacements {
+    let characters: [Character: String]
+    private let patterns: [(source: String, target: String)]
+
+    init(_ rules: [String: String]) {
+        var characters: [Character: String] = [:]
+        var patterns: [(source: String, target: String)] = []
+        for (source, target) in rules where !source.isEmpty && !target.isEmpty {
+            if source.count == 1, let character = source.first {
+                characters[character] = target
+            } else {
+                patterns.append((source, target))
+            }
+        }
+        self.characters = characters
+        self.patterns = patterns.sorted {
+            $0.source.count == $1.source.count ? $0.source < $1.source : $0.source.count > $1.source.count
+        }
+    }
+
+    func apply(_ text: String) -> String {
         var result = ""
         result.reserveCapacity(text.count)
-        var i = text.startIndex
-        let end = text.endIndex
-        while i < end {
-            var matched = false
-            for (pattern, replacement) in multiPatterns {
-                let endIdx = text.index(i, offsetBy: pattern.count, limitedBy: end) ?? end
-                if text[i..<endIdx] == pattern {
-                    result.append(replacement)
-                    i = endIdx
-                    matched = true
-                    break
-                }
-            }
-            if !matched {
-                let char = text[i]
-                result.append(charMap[char] ?? String(char))
-                i = text.index(after: i)
+        var index = text.startIndex
+        while index < text.endIndex {
+            if let match = patterns.first(where: { text[index...].hasPrefix($0.source) }) {
+                result.append(match.target)
+                index = text.index(index, offsetBy: match.source.count)
+            } else {
+                let character = text[index]
+                result.append(characters[character] ?? String(character))
+                index = text.index(after: index)
             }
         }
         return result
+    }
+
+    func patternScore(_ text: String) -> Int {
+        patterns.reduce(0) { score, rule in
+            score + (rule.source != rule.target && text.contains(rule.source) ? rule.source.count : 0)
+        }
     }
 }
 
 extension LayoutMapperPreset {
-
-    /// Inverse of `characterMapping()` for the single-character targets.
-    ///
-    /// Multi-character targets cannot be inverted character-by-character, so
-    /// they are skipped here — use `inverted(_:)` (via `apply(_:from:)`) when
-    /// they matter, e.g. in word substitution and text transformation.
+    /// Single-character inverse for direction detection. Longer targets are
+    /// handled by the same longest-match engine used in the live conversion.
     func reversedCharacterMapping() -> [Character: String] {
-        var reversed: [Character: String] = [:]
-        for (source, target) in characterMapping() where target.count == 1 {
-            if let first = target.first {
-                reversed[first] = String(source)
-            }
-        }
-        return reversed
+        LayoutMappingApplication(preset: self).reversedCharacters
     }
 
-    /// Apply this preset's mapping to `text`, typed in `fromLayout`.
-    ///
-    /// Shared direction-aware mapping for word substitution and text transformation.
-    /// The editor preview uses transform(_:) to choose its direction automatically.
-    /// The forward direction maps character by character; the reverse inverts
-    /// with longest-match so multi-character targets survive.
+    /// Shared by the editor preview, text correction, and dictionary learning.
+    /// Extra sources are matched in the original input, before regular keys
+    /// can consume them. A saved modifier describes how that source was typed;
+    /// converting existing text does not require the modifier to remain held.
     func apply(_ text: String, from fromLayout: String) -> String {
         guard !text.isEmpty else { return "" }
-        let forward = characterMapping()
-        if LayoutPair.namesMatch(fromLayout, self.fromLayout) {
-            var result = ""
-            result.reserveCapacity(text.count)
-            for char in text {
-                result.append(forward[char] ?? String(char))
-            }
-            return result
-        }
-        return LayoutMappingApplication(forward: forward).inverted(text)
+        let application = LayoutMappingApplication(preset: self)
+        return LayoutPair.namesMatch(fromLayout, self.fromLayout)
+            ? application.applying(text) : application.inverted(text)
     }
 
-    /// Transform `text` in this preset's direction, auto-detecting which side
-    /// the text is written in.
-    ///
-    /// The direction is chosen by counting characters that only occur in the
-    /// forward map versus only in the reverse map; ties go forward. Extra
-    /// mappings are applied afterwards as plain substring replacements.
+    /// Auto-detect the direction for the editor preview, then use exactly the
+    /// same conversion as the real text correction.
     func transform(_ text: String) -> String {
         guard !text.isEmpty else { return "" }
         let forward = characterMapping()
-        let reverse = reversedCharacterMapping()
-
+        let application = LayoutMappingApplication(preset: self)
+        let reverse = application.reversedCharacters
         var forwardHits = 0
         var reverseHits = 0
-        for ch in text {
-            let inForward = forward[ch] != nil && forward[ch] != String(ch)
-            let inReverse = reverse[ch] != nil && reverse[ch] != String(ch)
+        for character in text {
+            let inForward = forward[character] != nil && forward[character] != String(character)
+            let inReverse = reverse[character] != nil && reverse[character] != String(character)
             if inForward && !inReverse { forwardHits += 1 }
             if inReverse && !inForward { reverseHits += 1 }
         }
-
-        var result: String
-        if reverseHits > forwardHits {
-            result = LayoutMappingApplication(forward: forward).inverted(text)
-        } else {
-            var out = ""
-            out.reserveCapacity(text.count)
-            for ch in text { out.append(forward[ch] ?? String(ch)) }
-            result = out
-        }
-
-        for extra in extraMappings where !extra.source.isEmpty && !extra.target.isEmpty {
-            result = result.replacingOccurrences(of: extra.source, with: extra.target)
-        }
-        return result
+        forwardHits += application.forwardPatternScore(text)
+        reverseHits += application.reversePatternScore(text)
+        return reverseHits > forwardHits ? application.inverted(text) : application.applying(text)
     }
 }

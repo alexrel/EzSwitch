@@ -413,32 +413,28 @@ final class TextTransformer {
         return set
     }
 
-    /// How many letters of `text` this layout can type. Only letters are
-    /// scored: digits, punctuation and symbols are shared by most layouts, so
-    /// they would make every candidate look equally plausible.
-    private func layoutMatchScore(_ text: String, layout: String) -> Int {
-        guard !layout.isEmpty, layout != Constants.Default.noneLanguage else { return 0 }
-        let characters = charactersProduced(by: layout)
-        return text.reduce(0) { score, ch in
-            ch.isLetter && characters.contains(ch) ? score + 1 : score
-        }
-    }
-
     /// Pick the layout the text is most plausibly written in. The current
-    /// layout wins ties, so text made only of shared characters keeps its
-    /// existing behaviour.
+    /// layout wins ties. Extra-rule sources and targets are evidence even
+    /// when they are Option symbols or punctuation absent from the base map.
     private func detectSourceLayout(for text: String, current: String, candidates: [String]) -> String {
-        var best = current
-        var bestScore = layoutMatchScore(text, layout: current)
-
-        for candidate in candidates where !layoutsMatch(candidate, current) {
-            let score = layoutMatchScore(text, layout: candidate)
-            if score > bestScore {
-                best = candidate
-                bestScore = score
+        let store = MapperStore.shared
+        let settings = SettingsManager.shared
+        var seenPairs = Set<String>()
+        var activePresets: [LayoutMapperPreset] = []
+        for preset in store.presets {
+            let pairKey = [LayoutPair.normalized(preset.fromLayout), LayoutPair.normalized(preset.toLayout)]
+                .sorted().joined(separator: "|")
+            guard seenPairs.insert(pairKey).inserted else { continue }
+            let pairPresets = store.presets(for: preset.pair)
+            let selectedID = settings.selectedPresetId(for: preset.fromLayout, preset.toLayout)
+            if let active = pairPresets.first(where: { $0.id == selectedID }) ?? pairPresets.first {
+                activePresets.append(active)
             }
         }
-        return best
+        return TransformSourceDetection.layout(
+            for: text, current: current, candidates: candidates,
+            activePresets: activePresets, charactersProduced: charactersProduced(by:)
+        )
     }
 
     private func layoutsMatch(_ a: String, _ b: String) -> Bool {
@@ -460,7 +456,8 @@ final class TextTransformer {
 
         // 1. Try direct presets
         let directPresets = store.presets(for: LayoutPair(from: fromLayout, to: toLayout))
-        if let preset = directPresets.first {
+        let selectedID = SettingsManager.shared.selectedPresetId(for: fromLayout, toLayout)
+        if let preset = directPresets.first(where: { $0.id == selectedID }) ?? directPresets.first {
             // `apply(_:from:)` picks the direction itself and inverts with
             // longest-match, so multi-character targets survive the reverse hop.
             let result = preset.apply(text, from: fromLayout)

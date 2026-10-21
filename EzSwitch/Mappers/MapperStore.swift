@@ -95,14 +95,16 @@ final class MapperStore: ObservableObject {
         name: String,
         from: String,
         to: String,
-        mapping: [String: String] = [:]
+        mapping: [String: String] = [:],
+        nameStyle: LayoutMapperPreset.NameStyle = .custom
     ) -> LayoutMapperPreset {
         ensureSeeded()
         let preset = LayoutMapperPreset(
             name: name,
             fromLayout: from,
             toLayout: to,
-            mapping: mapping
+            mapping: mapping,
+            nameStyle: nameStyle
         )
         presets.append(preset)
         persist()
@@ -121,7 +123,11 @@ final class MapperStore: ObservableObject {
             let data = try Data(contentsOf: presetsFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let loaded = try decoder.decode([LayoutMapperPreset].self, from: data)
+            var loaded = try decoder.decode([LayoutMapperPreset].self, from: data)
+            let migratedNames = loaded.contains { $0.nameStyle == nil }
+            for index in loaded.indices where loaded[index].nameStyle == nil {
+                loaded[index].nameStyle = loaded[index].resolvedNameStyle
+            }
             // Deduplicate identical "(auto)" presets created by previous versions
             var seenAutoNames: Set<String> = []
             var deduplicated: [LayoutMapperPreset] = []
@@ -136,7 +142,7 @@ final class MapperStore: ObservableObject {
                 deduplicated.append(p)
             }
             presets = deduplicated
-            if deduplicated.count != loaded.count {
+            if migratedNames || deduplicated.count != loaded.count {
                 persist()
             }
             Log.store.debug("Loaded \(self.presets.count, privacy: .public) preset(s) from disk")
@@ -222,7 +228,8 @@ final class MapperStore: ObservableObject {
             name: "\(LayoutRegistry.displayName(forID: from)) ↔ \(LayoutRegistry.displayName(forID: to)) (auto)",
             fromLayout: from,
             toLayout: to,
-            mapping: mapping
+            mapping: mapping,
+            nameStyle: .automatic
         )
         presets.append(preset)
         settings.setSelectedPresetId(preset.id, for: from, to)

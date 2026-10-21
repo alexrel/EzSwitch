@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full localization picture: every key-producing mechanism vs both catalogs."""
+"""Full localization picture: every key-producing mechanism vs all supported catalogs."""
 import os
 import re
 import sys
@@ -13,6 +13,8 @@ CATS = {"en": "EzSwitch/en.lproj/Localizable.strings",
 
 # Every construct that yields a localization lookup.
 PATTERNS = {
+    "String(appLocalized:)": re.compile(r'String\(appLocalized:\s*"((?:[^"\\]|\\.)*)"'),
+    "Sheet localization value": re.compile(r'(?:title|actionName):\s*"((?:[^"\\]|\\.)*)"'),
     "String(localized:)": re.compile(r'String\(localized:\s*"((?:[^"\\]|\\.)*)"'),
     "Text(literal)":      re.compile(r'\bText\(\s*"((?:[^"\\]|\\.)*)"\s*\)'),
     "NSLocalizedString":  re.compile(r'NSLocalizedString\(\s*"((?:[^"\\]|\\.)*)"'),

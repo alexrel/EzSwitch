@@ -3,14 +3,14 @@ import Carbon
 
 /// Stable identity for a keyboard layout.
 ///
-/// A layout's localized name is whatever the system reports for the current
-/// language: `Russian – PC` under English, `Русская — ПК` under Russian. It
-/// can change with the system language, so persisted names may stop matching.
+/// Display names follow the app language, while persisted identity stays fixed.
 ///
 /// `kTISPropertyInputSourceID` (`com.apple.keylayout.RussianWin`) does not
 /// depend on the system language. New settings use IDs; legacy files may
 /// still contain names. Resolve the localized name for display.
 enum LayoutRegistry {
+
+    private static let appleLayouts = Bundle(path: "/System/Library/Keyboard Layouts/AppleKeyboardLayouts.bundle")
 
     /// A layout as offered to the user: stable `id` plus localized `name`.
     struct Layout: Identifiable, Hashable {
@@ -27,7 +27,7 @@ enum LayoutRegistry {
     // MARK: - Enumeration
 
     /// Enabled, user-selectable keyboard layouts, sorted by localized name.
-    static func available() -> [Layout] {
+    static func available(languageCode: String = AppLocalization.shared.languageCode) -> [Layout] {
         var seen = Set<String>()
         var layouts: [Layout] = []
 
@@ -37,7 +37,7 @@ enum LayoutRegistry {
                   let name = KeyboardLayoutUtility.localizedName(of: source),
                   !name.isEmpty,
                   seen.insert(id).inserted else { continue }
-            layouts.append(Layout(id: id, name: name))
+            layouts.append(Layout(id: id, name: localizedName(forID: id, fallback: name, languageCode: languageCode)))
         }
 
         return layouts.sorted {
@@ -116,9 +116,24 @@ enum LayoutRegistry {
     ///
     /// Unknown ids come back unchanged so a layout removed from the system
     /// stays visible instead of turning into an unexplained empty row.
-    static func displayName(forID id: String) -> String {
+    static func displayName(forID id: String, languageCode: String = AppLocalization.shared.languageCode) -> String {
         guard !id.isEmpty, id != Constants.Default.noneLanguage else { return id }
         guard let source = source(forID: id) else { return id }
-        return KeyboardLayoutUtility.localizedName(of: source) ?? id
+        let fallback = KeyboardLayoutUtility.localizedName(of: source) ?? id
+        return localizedName(forID: id, fallback: fallback, languageCode: languageCode)
+    }
+
+    private static func localizedName(forID id: String, fallback: String, languageCode: String) -> String {
+        let prefix = "com.apple.keylayout."
+        guard id.hasPrefix(prefix), let bundle = appleLayouts else { return fallback }
+        let key = String(id.dropFirst(prefix.count))
+        // TIS names retain the process's launch language. Ask the system's
+        // layout catalog for an explicit localization instead of changing TIS
+        // or translating third-party layout names ourselves.
+        if #available(macOS 15.4, *) {
+            return bundle.localizedString(forKey: key, value: fallback, table: "InfoPlist",
+                                          localizations: [Locale.Language(identifier: languageCode)])
+        }
+        return fallback
     }
 }

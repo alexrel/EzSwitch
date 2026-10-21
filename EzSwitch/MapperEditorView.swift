@@ -91,6 +91,7 @@ struct KeyboardLayoutGrid {
 /// Visual editor for a `LayoutMapperPreset`.
 /// Shows a virtual keyboard where each key displays its mapping.
 struct MapperEditorView: View {
+    @ObservedObject private var localization = AppLocalization.shared
     @Binding var preset: LayoutMapperPreset
     var presetsForPair: [LayoutMapperPreset] = []
     var onSelectPreset: ((String) -> Void)? = nil
@@ -130,20 +131,20 @@ struct MapperEditorView: View {
                     testArea
                     // Normal keys
                     keyboardSection(
-                        title: String(localized: "No modifier (base)"),
+                        title: String(appLocalized: "No modifier (base)"),
                         icon: "keyboard",
                         modifier: .none
                     )
                     // Shift keys
                     keyboardSection(
-                        title: String(localized: "With Shift held"),
+                        title: String(appLocalized: "With Shift held"),
                         icon: "shift.fill",
                         modifier: .shift
                     )
                     // Extra mappings (custom combos with explicit modifier)
                     extraSection
                 }
-                .padding(16)
+                .padding(.top, SettingsLayout.editorSectionInset)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -152,130 +153,84 @@ struct MapperEditorView: View {
             set: { if !$0 { editingKey = nil } }
         )) {
             if let key = editingKey {
-                charPickerSheet(for: key)
+                LocalizedContent { charPickerSheet(for: key) }
             }
         }
         .sheet(isPresented: $isExtraPickerOpen) {
             if let mapping = editingExtraMapping {
-                extraPickerSheet(mapping: binding(for: mapping))
+                LocalizedContent { extraPickerSheet(mapping: binding(for: mapping)) }
             }
         }
         .confirmationDialog(
-            String(localized: "Overwrite current mapping with auto-generated keys?"),
+            String(appLocalized: "Overwrite current mapping with auto-generated keys?"),
             isPresented: $showAutoConfirm,
             titleVisibility: .visible
         ) {
-            Button(String(localized: "Auto-generate"), role: .destructive) {
+            Button(String(appLocalized: "Auto-generate"), role: .destructive) {
                 applyAutoMapping()
             }
-            Button(String(localized: "Cancel"), role: .cancel) {}
+            Button(String(appLocalized: "Cancel"), role: .cancel) {}
         } message: {
-            Text(String(localized: "All custom key changes in “\(preset.name)” will be replaced with the default \(preset.displayFromLayout) → \(preset.displayToLayout) layout mapping."))
+            Text(String(appLocalized: "All custom key changes in “\(preset.displayName)” will be replaced with the default \(preset.displayFromLayout) → \(preset.displayToLayout) layout mapping."))
         }
         .confirmationDialog(
-            String(localized: "Clear all mapped keys in this preset?"),
+            String(appLocalized: "Clear all mapped keys in this preset?"),
             isPresented: $showClearKeysConfirm,
             titleVisibility: .visible
         ) {
-            Button(String(localized: "Clear keys"), role: .destructive) {
+            Button(String(appLocalized: "Clear keys"), role: .destructive) {
                 resetMapping()
             }
-            Button(String(localized: "Cancel"), role: .cancel) {}
+            Button(String(appLocalized: "Cancel"), role: .cancel) {}
         } message: {
-            Text(String(localized: "This will clear all \(preset.mapping.count) mapped keys in “\(preset.name)”."))
+            Text(String(appLocalized: "This will clear all \(preset.mapping.count) mapped keys in “\(preset.displayName)”."))
         }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(String(localized: "Mapper editor"))
-                        .font(.title3.bold())
-                    Text(verbatim: "\(preset.mapping.count) " + String(localized: "characters"))
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(.accentColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(Color.accentColor.opacity(0.12))
-                        )
-                }
-                Text("\(preset.displayFromLayout) ↔ \(preset.displayToLayout)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(String(appLocalized: "Active preset"))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text(verbatim: "\(preset.mapping.count) " + String(appLocalized: "characters"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            .fixedSize(horizontal: true, vertical: true)
-
-            Spacer()
-
-            // Preset selector & preset actions (only visible on Character Mappings tab)
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 if !presetsForPair.isEmpty {
-                    Picker("", selection: Binding(
+                    SettingsPicker(String(appLocalized: "Active preset"), selection: Binding(
                         get: { preset.id },
-                        set: { newID in
-                            onSelectPreset?(newID)
-                        }
-                    )) {
-                        ForEach(presetsForPair) { p in
-                            Text(p.name).tag(p.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .frame(maxWidth: 220)
+                        set: { onSelectPreset?($0) }
+                    ), options: presetsForPair.map { ($0.id, $0.displayName) })
+                    .frame(maxWidth: 300)
                 }
-
-                if let onNewPreset = onNewPreset {
-                    Button {
-                        onNewPreset()
-                    } label: {
-                        Label(String(localized: "New"), systemImage: "plus")
-                    }
-                    .controlSize(.small)
-                    .fixedSize()
-                    .help(String(localized: "Create a new preset"))
+                Spacer(minLength: 0)
+                if let onNewPreset {
+                    Button(action: onNewPreset) { Label(String(appLocalized: "New"), systemImage: "plus") }
+                        .help(String(appLocalized: "Create a new preset"))
                 }
-
                 Button {
-                    if preset.mapping.isEmpty {
-                        applyAutoMapping()
-                    } else {
-                        showAutoConfirm = true
-                    }
+                    if preset.mapping.isEmpty { applyAutoMapping() } else { showAutoConfirm = true }
                 } label: {
-                    Label(String(localized: "Auto"), systemImage: "wand.and.stars")
+                    Label(String(appLocalized: "Auto-generate"), systemImage: "wand.and.stars")
                 }
-                .controlSize(.small)
-                .fixedSize()
-                .help(String(localized: "Fill keys automatically from system layouts"))
-
-                Button {
-                    showClearKeysConfirm = true
-                } label: {
-                    Image(systemName: "eraser")
-                }
-                .controlSize(.small)
-                .disabled(preset.mapping.isEmpty)
-                .help(String(localized: "Clear all keys…"))
-
-                if let onDeletePreset = onDeletePreset {
-                    Button(role: .destructive) {
-                        onDeletePreset()
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .controlSize(.small)
-                    .help(String(localized: "Delete preset…"))
+                .help(String(appLocalized: "Fill keys automatically from system layouts"))
+                Button { showClearKeysConfirm = true } label: { Image(systemName: "eraser") }
+                    .disabled(preset.mapping.isEmpty)
+                    .help(String(appLocalized: "Clear all keys…"))
+                    .accessibilityLabel(String(appLocalized: "Clear all keys…"))
+                if let onDeletePreset {
+                    Button(role: .destructive, action: onDeletePreset) { Image(systemName: "trash") }
+                        .help(String(appLocalized: "Delete preset…"))
+                        .accessibilityLabel(String(appLocalized: "Delete preset…"))
                 }
             }
+            Text(String(appLocalized: "This preset is used for the selected pair. Changes are saved automatically."))
+                .font(.system(size: 11)).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 56)
+        .padding(.vertical, SettingsLayout.editorSectionInset)
     }
 
     // MARK: - Test Area
@@ -286,18 +241,18 @@ struct MapperEditorView: View {
                 Image(systemName: "text.cursor")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.accentColor)
-                Text(String(localized: "Test mapping"))
+                Text(String(appLocalized: "Test mapping"))
                     .font(.subheadline.weight(.semibold))
             }
             .layoutPriority(1)
 
             // Input field
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: String(localized: "Input (%@)"), preset.displayFromLayout))
+                Text(String(format: String(appLocalized: "Input (%@)"), preset.displayFromLayout))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 HStack(spacing: 4) {
-                    TextField(String(localized: "Enter text to test…"), text: $testInput)
+                    TextField(String(appLocalized: "Enter text to test…"), text: $testInput)
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: testInput) { _, newValue in
                             testOutput = transform(newValue)
@@ -311,20 +266,20 @@ struct MapperEditorView: View {
                                 .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .help(String(localized: "Clear test text"))
+                        .help(String(appLocalized: "Clear test text"))
                     }
                 }
             }
             .frame(maxWidth: .infinity)
 
-            Image(systemName: "arrow.right")
+            Image(systemName: localization.isRightToLeft ? "arrow.left" : "arrow.right")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
                 .padding(.top, 14)
 
             // Result field
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: String(localized: "Result (%@)"), preset.displayToLayout))
+                Text(String(format: String(appLocalized: "Result (%@)"), preset.displayToLayout))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 TextField("", text: .constant(testOutput))
@@ -360,15 +315,15 @@ struct MapperEditorView: View {
                     Text(preset.displayFromLayout)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.secondary)
-                    Image(systemName: "arrow.down.right")
+                    Image(systemName: localization.isRightToLeft ? "arrow.down.left" : "arrow.down.right")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundColor(.secondary.opacity(0.6))
                     Text(preset.displayToLayout)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.accentColor)
-                    Text("·")
+                    Text(verbatim: "·")
                         .foregroundColor(.secondary.opacity(0.5))
-                    Text(String(localized: "Click any key to edit"))
+                    Text(String(appLocalized: "Click any key to edit"))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -533,7 +488,7 @@ struct MapperEditorView: View {
         VStack(spacing: 0) {
             // Top: title (no buttons, hugs the top edge)
             HStack(spacing: 6) {
-                Text(String(localized: "Map key"))
+                Text(String(appLocalized: "Map key"))
                     .font(.headline)
                 Text(modifierLabel(editingModifier))
                     .font(.caption2)
@@ -554,11 +509,11 @@ struct MapperEditorView: View {
                 VStack(spacing: 4) {
                     HStack(spacing: 14) {
                         Spacer()
-                        Text(String(localized: "Source"))
+                        Text(String(appLocalized: "Source"))
                             .frame(width: 44)
                         Color.clear
                             .frame(width: 16, height: 1)
-                        Text(String(localized: "Target"))
+                        Text(String(appLocalized: "Target"))
                             .frame(width: 80)
                         Spacer()
                     }
@@ -579,7 +534,7 @@ struct MapperEditorView: View {
                                     .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
                             )
 
-                        Image(systemName: "arrow.right")
+                        Image(systemName: localization.isRightToLeft ? "arrow.left" : "arrow.right")
                             .font(.body.weight(.semibold))
                             .foregroundColor(.secondary)
                             .frame(width: 16)
@@ -597,7 +552,7 @@ struct MapperEditorView: View {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
                             )
-                            .help(String(localized: "Type any character, emoji or symbol"))
+                            .help(String(appLocalized: "Type any character, emoji or symbol"))
 
                         Spacer()
                     }
@@ -605,7 +560,7 @@ struct MapperEditorView: View {
 
                 // Suggestions with label
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(String(localized: "Suggestions"))
+                    Text(String(appLocalized: "Suggestions"))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     let suggestions = suggestionsForKey(key, modifier: editingModifier)
@@ -620,7 +575,6 @@ struct MapperEditorView: View {
                                         .frame(minWidth: 22)
                                 }
                                 .buttonStyle(.bordered)
-                                .controlSize(.small)
                             }
                         }
                     }
@@ -634,12 +588,11 @@ struct MapperEditorView: View {
                     Button {
                         pickerChar = ""
                     } label: {
-                        Label(String(localized: "Clear"), systemImage: "trash")
+                        Label(String(appLocalized: "Clear"), systemImage: "trash")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .tint(.red)
-                    .help(String(localized: "Remove mapping for this key"))
+                    .help(String(appLocalized: "Remove mapping for this key"))
 
                     Button {
                         // Auto-fill from target layout for the current selected modifier
@@ -651,11 +604,10 @@ struct MapperEditorView: View {
                             pickerChar = String(auto)
                         }
                     } label: {
-                        Label(String(localized: "Auto"), systemImage: "wand.and.stars")
+                        Label(String(appLocalized: "Auto"), systemImage: "wand.and.stars")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help(String(localized: "Auto-fill from target layout"))
+                    .help(String(appLocalized: "Auto-fill from target layout"))
                 }
 
                 Spacer()
@@ -664,27 +616,25 @@ struct MapperEditorView: View {
                     Button {
                         editingKey = nil
                     } label: {
-                        Label(String(localized: "Cancel"), systemImage: "xmark")
+                        Label(String(appLocalized: "Cancel"), systemImage: "xmark")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .keyboardShortcut(.cancelAction)
 
                     Button {
                         applyPickerSelection()
                         editingKey = nil
                     } label: {
-                        Label(String(localized: "Save"), systemImage: "checkmark")
+                        Label(String(appLocalized: "Save"), systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                     .keyboardShortcut(.return)
                 }
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .frame(width: 400, height: 220)
+        .frame(width: 480, height: 260)
         .onAppear {
             // Initialise the working state from the key the user clicked
             if lastEditingKey != key {
@@ -702,7 +652,6 @@ struct MapperEditorView: View {
 
     /// Quick suggestions for common mappings.
     /// Suggest the selected target variant plus a base/Shift alternative.
-    /// Shift+Option uses Shift as the primary suggestion.
     private func suggestionsForKey(_ key: VisualKey, modifier: KeyboardLayoutUtility.Modifier) -> [String] {
         // Offer base when Shift is selected; otherwise offer Shift.
         let wantsShifted = (modifier == .shift || modifier == .shiftOption)
@@ -710,7 +659,7 @@ struct MapperEditorView: View {
 
         guard let primary = KeyboardLayoutUtility.character(
             forKeyCode: key.keyCode,
-            modifier: modifier == .shiftOption ? .shift : modifier,
+            modifier: modifier,
             layout: preset.toLayout
         ) else { return [] }
         guard let secondary = KeyboardLayoutUtility.character(
@@ -763,10 +712,10 @@ struct MapperEditorView: View {
                 Image(systemName: "plus.forwardslash.minus")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.accentColor)
-                Text(String(localized: "Extra"))
+                Text(String(appLocalized: "Extra"))
                     .font(.subheadline.weight(.semibold))
                 if !preset.extraMappings.isEmpty {
-                    Text("\(preset.extraMappings.count)")
+                    Text(verbatim: "\(preset.extraMappings.count)")
                         .font(.caption2.weight(.semibold))
                         .foregroundColor(.accentColor)
                         .padding(.horizontal, 6)
@@ -787,16 +736,15 @@ struct MapperEditorView: View {
                     editingExtraMapping = newMapping
                     isExtraPickerOpen = true
                 } label: {
-                    Label(String(localized: "Add"), systemImage: "plus")
+                    Label(String(appLocalized: "Add"), systemImage: "plus")
                 }
-                .controlSize(.small)
             }
             .padding(.horizontal, 4)
 
             if preset.extraMappings.isEmpty {
                 HStack {
                     Spacer()
-                    Text(String(localized: "No extra mappings. Click Add to create one."))
+                    Text(String(appLocalized: "No extra mappings. Click Add to create one."))
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.vertical, 10)
@@ -846,20 +794,21 @@ struct MapperEditorView: View {
         VStack(spacing: 0) {
             // Top: title + modifier picker in top-right corner
             HStack(spacing: 6) {
-                Text(String(localized: "Extra Mapping"))
+                Text(String(appLocalized: "Extra Mapping"))
                     .font(.headline)
                 Spacer()
                 Picker("", selection: mapping.modifier) {
-                    Text(String(localized: "None")).tag(KeyboardLayoutUtility.Modifier.none)
-                    Text("Shift").tag(KeyboardLayoutUtility.Modifier.shift)
-                    Text("Option").tag(KeyboardLayoutUtility.Modifier.option)
-                    Text("Shift+Opt").tag(KeyboardLayoutUtility.Modifier.shiftOption)
+                    let modifiers: [KeyboardLayoutUtility.Modifier] = [.none, .shift, .option, .shiftOption]
+                    ForEach(localization.isRightToLeft ? Array(modifiers.reversed()) : modifiers, id: \.rawValue) { modifier in
+                        Text(modifier == .none ? String(appLocalized: "None") :
+                                modifier == .shiftOption ? String(appLocalized: "Shift+Opt") : modifier.displayName)
+                            .tag(modifier)
+                    }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .controlSize(.mini)
-                .frame(width: 200)
-                .help(String(localized: "Choose which modifier triggers this mapping"))
+                .frame(width: 260)
+                .help(String(appLocalized: "Choose the modifier used to type the source character."))
             }
             .padding(.top, 2)
 
@@ -870,11 +819,11 @@ struct MapperEditorView: View {
                 VStack(spacing: 4) {
                     HStack(spacing: 14) {
                         Spacer()
-                        Text(String(localized: "Source"))
+                        Text(String(appLocalized: "Source"))
                             .frame(width: 90)
                         Color.clear
                             .frame(width: 16, height: 1)
-                        Text(String(localized: "Target"))
+                        Text(String(appLocalized: "Target"))
                             .frame(width: 110)
                         Spacer()
                     }
@@ -901,8 +850,9 @@ struct MapperEditorView: View {
                                     mapping.modifier.wrappedValue = .shift
                                 }
                             }
+                            .help(String(appLocalized: "Enter the source character as typed, including Shift or Option."))
 
-                        Image(systemName: "arrow.right")
+                        Image(systemName: localization.isRightToLeft ? "arrow.left" : "arrow.right")
                             .font(.body.weight(.semibold))
                             .foregroundColor(.secondary)
                             .frame(width: 16)
@@ -920,7 +870,7 @@ struct MapperEditorView: View {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .stroke(Color.accentColor.opacity(0.4), lineWidth: 1.5)
                             )
-                            .help(String(localized: "Type any character, emoji or symbol"))
+                            .help(String(appLocalized: "Type any character, emoji or symbol"))
 
                         Spacer()
                     }
@@ -928,7 +878,7 @@ struct MapperEditorView: View {
 
                 // Suggestions (based on source lookup if source is 1 char)
                 if let sourceChar = mapping.source.wrappedValue.first,
-                   let sourceKey = keyboardKeyForChar(sourceChar) {
+                   let sourceKey = keyboardKeyForChar(sourceChar, modifier: mapping.modifier.wrappedValue) {
                     let suggestions = suggestionsForKey(sourceKey, modifier: mapping.modifier.wrappedValue)
                     if !suggestions.isEmpty {
                         HStack(spacing: 4) {
@@ -941,7 +891,6 @@ struct MapperEditorView: View {
                                         .frame(minWidth: 22)
                                 }
                                 .buttonStyle(.bordered)
-                                .controlSize(.small)
                             }
                         }
                     }
@@ -956,10 +905,9 @@ struct MapperEditorView: View {
                     mapping.source.wrappedValue = ""
                     mapping.target.wrappedValue = ""
                 } label: {
-                    Label(String(localized: "Clear"), systemImage: "trash")
+                    Label(String(appLocalized: "Clear"), systemImage: "trash")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
                 .tint(.red)
 
                 Spacer()
@@ -973,20 +921,18 @@ struct MapperEditorView: View {
                         }
                         isExtraPickerOpen = false
                     } label: {
-                        Label(String(localized: "Cancel"), systemImage: "xmark")
+                        Label(String(appLocalized: "Cancel"), systemImage: "xmark")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .keyboardShortcut(.cancelAction)
 
                     Button {
                         isExtraPickerOpen = false
                         testOutput = transform(testInput)
                     } label: {
-                        Label(String(localized: "Save"), systemImage: "checkmark")
+                        Label(String(appLocalized: "Save"), systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                     .keyboardShortcut(.return)
                     .disabled(mapping.source.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty ||
                               mapping.target.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -995,15 +941,17 @@ struct MapperEditorView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .frame(width: 400, height: 220)
+        .frame(width: 480, height: 260)
     }
 
     /// Try to find the VisualKey that produces the given character in the source layout.
-    private func keyboardKeyForChar(_ char: Character) -> VisualKey? {
-        for row in grid.rows {
-            for key in row {
-                if lookupSource(for: key, modifier: .none) == String(char) {
-                    return key
+    private func keyboardKeyForChar(_ char: Character, modifier: KeyboardLayoutUtility.Modifier) -> VisualKey? {
+        for variant in [modifier, .none, .shift, .option, .shiftOption] {
+            for row in grid.rows {
+                for key in row {
+                    if lookupSource(for: key, modifier: variant) == String(char) {
+                        return key
+                    }
                 }
             }
         }
@@ -1028,6 +976,7 @@ struct MapperEditorView: View {
 // MARK: - Tactile Keycap Button
 
 private struct KeycapButton: View {
+    @ObservedObject private var localization = AppLocalization.shared
     let sourceChar: String
     let targetChar: String?
     let action: () -> Void
@@ -1139,6 +1088,7 @@ private struct KeycapButton: View {
 // MARK: - Unified Mapping Row (used in both Extra and Word Substitutions)
 
 struct MappingListRow: View {
+    @ObservedObject private var localization = AppLocalization.shared
     let source: String
     let target: String
     var modifier: KeyboardLayoutUtility.Modifier? = nil
@@ -1170,7 +1120,7 @@ struct MappingListRow: View {
                         }
                     }
 
-                    Image(systemName: isBidirectional ? "arrow.left.and.right" : "arrow.right")
+                    Image(systemName: isBidirectional ? "arrow.left.and.right" : (localization.isRightToLeft ? "arrow.left" : "arrow.right"))
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(isBidirectional ? .accentColor : .secondary)
                         .frame(width: 16)
@@ -1186,7 +1136,7 @@ struct MappingListRow: View {
                         HStack(spacing: 3) {
                             Image(systemName: "globe")
                                 .font(.system(size: 8, weight: .bold))
-                            Text(String(localized: "Switch layout"))
+                            Text(String(appLocalized: "Switch layout"))
                                 .font(.caption2.weight(.medium))
                         }
                         .foregroundColor(.purple)
@@ -1202,7 +1152,7 @@ struct MappingListRow: View {
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.left.and.right")
                                 .font(.system(size: 8, weight: .bold))
-                            Text(String(localized: "Both ways"))
+                            Text(String(appLocalized: "Both ways"))
                                 .font(.caption2.weight(.medium))
                         }
                         .foregroundColor(.accentColor)
@@ -1241,7 +1191,7 @@ struct MappingListRow: View {
                     )
             }
             .buttonStyle(.plain)
-            .help(String(localized: "Delete"))
+            .help(String(appLocalized: "Delete"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)

@@ -72,6 +72,14 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     /// Display name for this preset
     var name: String
 
+    /// Generated names are displayed from the current layout labels. Custom
+    /// names stay exactly as entered. Nil supports presets saved before this metadata.
+    var nameStyle: NameStyle?
+
+    enum NameStyle: String, Codable {
+        case custom, automatic, pair
+    }
+
     /// Source layout — stable input source id (e.g. `com.apple.keylayout.RussianWin`).
     /// Legacy presets may still contain a localized name.
     let fromLayout: String
@@ -84,16 +92,15 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     /// characters, including emoji or abbreviations.
     var mapping: [String: String]
 
-    /// Extra (custom) mappings with modifier support.
-    /// Each entry maps a source character + modifier to a target string,
-    /// allowing the user to define non-standard key combinations.
+    /// Explicit character or text overrides, including Option/Shift+Option
+    /// characters excluded from the automatically generated key map.
     var extraMappings: [ExtraMapping]
 
     /// Represents a single custom mapping with an explicit modifier choice.
     /// Stores the modifier as a raw UInt32 in JSON.
     struct ExtraMapping: Codable, Identifiable, Hashable {
         let id: String
-        /// Source character (single char, e.g. "п")
+        /// Actual source text as typed (e.g. "Ђ" produced with Shift+Option).
         var source: String
         /// Target string (may be multi-byte, e.g. emoji or symbol)
         var target: String
@@ -131,10 +138,12 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
         fromLayout: String,
         toLayout: String,
         mapping: [String: String] = [:],
-        extraMappings: [ExtraMapping] = []
+        extraMappings: [ExtraMapping] = [],
+        nameStyle: NameStyle? = nil
     ) {
         self.id = id
         self.name = name
+        self.nameStyle = nameStyle
         self.fromLayout = fromLayout
         self.toLayout = toLayout
         self.mapping = mapping
@@ -155,6 +164,30 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
     /// Localized target layout name. See `displayFromLayout`.
     var displayToLayout: String { LayoutRegistry.displayName(forID: toLayout) }
 
+    var displayName: String {
+        switch resolvedNameStyle {
+        case .custom: return name
+        case .automatic: return String(appLocalized: "\(displayFromLayout) ↔ \(displayToLayout) (auto)")
+        case .pair: return String(appLocalized: "\(displayFromLayout) ↔ \(displayToLayout)")
+        }
+    }
+
+    /// Recognize only exact generated names from older versions, rather than
+    /// treating every user name ending in "(auto)" as an automatic title.
+    var resolvedNameStyle: NameStyle {
+        if let nameStyle { return nameStyle }
+        guard name.contains("↔") || name.contains("→") else { return .custom }
+        let normalized = LayoutPair.normalized(name)
+        for language in ["en", "ru", "uk", "he"] {
+            let from = LayoutRegistry.displayName(forID: fromLayout, languageCode: language)
+            let to = LayoutRegistry.displayName(forID: toLayout, languageCode: language)
+            if normalized == LayoutPair.normalized("\(from) ↔ \(to) (auto)") { return .automatic }
+            if normalized == LayoutPair.normalized("\(from) ↔ \(to)") ||
+                normalized == LayoutPair.normalized("\(from) → \(to)") { return .pair }
+        }
+        return .custom
+    }
+
     /// Number of mapped characters
     var mappingCount: Int { mapping.count }
 
@@ -170,6 +203,9 @@ struct LayoutMapperPreset: Codable, Identifiable, Equatable {
         for (key, value) in mapping {
             guard !value.isEmpty, let k = key.first else { continue }
             result[k] = value
+        }
+        for extra in extraMappings where extra.source.count == 1 && !extra.target.isEmpty {
+            if let source = extra.source.first { result[source] = extra.target }
         }
         return result
     }

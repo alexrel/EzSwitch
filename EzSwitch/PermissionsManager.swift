@@ -1,15 +1,33 @@
 import Cocoa
 import Foundation
+import Combine
 
-class PermissionsManager {
+final class PermissionsManager: ObservableObject {
     static let shared = PermissionsManager()
-    
-    var isAccessibilityGranted: Bool {
-        return AXIsProcessTrusted()
+
+    @Published private(set) var isAccessibilityGranted = AXIsProcessTrusted()
+    @Published private(set) var isInputMonitoringGranted = CGPreflightListenEventAccess()
+
+    var allGranted: Bool { isAccessibilityGranted && isInputMonitoringGranted }
+
+    func refresh() {
+        let accessibility = AXIsProcessTrusted()
+        let inputMonitoring = CGPreflightListenEventAccess()
+        if accessibility != isAccessibilityGranted { isAccessibilityGranted = accessibility }
+        if inputMonitoring != isInputMonitoringGranted { isInputMonitoringGranted = inputMonitoring }
     }
 
     func openSecurityPreferences() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
+        openPrivacyPane("Privacy_Accessibility")
+    }
+
+    func openInputMonitoringPreferences() {
+        openPrivacyPane("Privacy_ListenEvent")
+    }
+
+    private func openPrivacyPane(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)"),
+           NSWorkspace.shared.open(url) { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
     }
 }

@@ -34,10 +34,10 @@ enum KeyboardLayoutUtility {
         /// Human-readable label used in the editor and mapping lists.
         var displayName: String {
             switch self {
-            case .none: return String(localized: "No modifier")
+            case .none: return String(appLocalized: "No modifier")
             case .shift: return "Shift"
             case .option: return "Option"
-            case .shiftOption: return String(localized: "Shift + Option")
+            case .shiftOption: return String(appLocalized: "Shift + Option")
             }
         }
     }

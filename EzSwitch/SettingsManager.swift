@@ -14,12 +14,12 @@ enum TransformKeyType: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .doubleLeftShift: return String(localized: "Double Left Shift")
-        case .doubleRightShift: return String(localized: "Double Right Shift")
-        case .doubleBothShift: return String(localized: "Double Shift (any)")
-        case .doubleLeftOption: return String(localized: "Double Left Option")
-        case .doubleRightOption: return String(localized: "Double Right Option")
-        case .doubleBothOption: return String(localized: "Double Option (any)")
+        case .doubleLeftShift: return String(appLocalized: "Double Left Shift")
+        case .doubleRightShift: return String(appLocalized: "Double Right Shift")
+        case .doubleBothShift: return String(appLocalized: "Double Shift (any)")
+        case .doubleLeftOption: return String(appLocalized: "Double Left Option")
+        case .doubleRightOption: return String(appLocalized: "Double Right Option")
+        case .doubleBothOption: return String(appLocalized: "Double Option (any)")
         }
     }
 
@@ -52,8 +52,8 @@ enum SwitchModifier: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .command: return String(localized: "⌘  Command")
-        case .option:  return String(localized: "⌥  Option")
+        case .command: return String(appLocalized: "⌘  Command")
+        case .option:  return String(appLocalized: "⌥  Option")
         }
     }
 
@@ -80,6 +80,18 @@ final class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
 
     private let defaults = UserDefaults.standard
+
+    /// Session-only pause: resuming keeps every feature's saved preference.
+    @Published var isPaused = false {
+        didSet { refreshKeyboardMonitoring() }
+    }
+
+    @Published var interfaceLanguage: AppLanguage {
+        didSet {
+            interfaceLanguage.save(in: defaults)
+            AppLocalization.shared.apply(interfaceLanguage)
+        }
+    }
 
     /// Layout bound to the left switch key, as a stable input source id
     /// (`com.apple.keylayout.*`). Never a localized name — see `LayoutRegistry`.
@@ -197,6 +209,8 @@ final class SettingsManager: ObservableObject {
     }
 
     private init() {
+        let language = AppLanguage.stored(in: defaults)
+        self.interfaceLanguage = language
         self.leftCommandLayout = defaults.string(forKey: Constants.DefaultsKey.leftCommandLayout) ?? Constants.Default.leftLayoutID
         self.rightCommandLayout = defaults.string(forKey: Constants.DefaultsKey.rightCommandLayout) ?? Constants.Default.rightLayoutID
         // Default to Command (Left and Right both react, one per language) so
@@ -238,7 +252,7 @@ final class SettingsManager: ObservableObject {
         // Word sub needs to be able to suppress the hotkey key (e.g. ⌘⇧M) in the
         // target app, so the tap must always run in defaultTap mode when word sub
         // is on — even if the transform key isn't being suppressed.
-        let shouldMonitor = commandSwitchEnabled || enableTransformKey || enableWordSubstitution
+        let shouldMonitor = !isPaused && (commandSwitchEnabled || enableTransformKey || enableWordSubstitution)
         let needsSuppression = (enableTransformKey && suppressTransformKey) || enableWordSubstitution
 
         if shouldMonitor {
