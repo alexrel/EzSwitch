@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/ezSwitch-app.png" alt="EzSwitch Settings" width="380">
+  <img src="screenshots/ezSwitch-app.png" alt="EzSwitch menu bar quick controls" width="420">
 </p>
 
 ## Features
@@ -198,16 +198,11 @@ To grant permissions:
    - Click **Auto-generate** to automatically populate all keys from the installed macOS keyboard layouts via `UCKeyTranslate`
    - Click **Clear all keys** (`🧹`) to reset keys in the current preset, or **Delete preset** (`🗑`) to remove the preset
 4. Click any keycap on the virtual keyboard (Base or `⇧ Shift` layer) to customize its target character or multi-character string
-
-   <p align="center">
-     <img src="screenshots/ezSwitch-mapper.png" alt="Mapper editor with visual keyboard" width="700">
-   </p>
-
-   <p align="center">
-     <img src="screenshots/ezSwitch-mapper-key.png" alt="Map key picker" width="700">
-   </p>
-
 5. Use the **Test mapping** bar to preview transformations in either direction in real time
+
+<p align="center">
+  <img src="screenshots/ezSwitch-mapper.png" alt="Character mapping settings with a live preview and visual keyboard" width="900">
+</p>
 
 ### Configuring Word Substitutions (`Word Substitutions`)
 
@@ -215,6 +210,10 @@ To grant permissions:
 2. **Quick training via Hotkey**: type a word in any app (e.g. `пше`) or select a word, then press **⌘⌥M** (customizable using the **Remember Word** button in the header). EzSwitch replaces the word with `git` in place and saves `пше → git` to your list
 3. **Manual entry**: click **+ Add** to add a custom word pair. Check **Switch keyboard layout to target language** (`🌐 Switch layout`) if you want the system keyboard layout to automatically switch to the target language upon replacement
 4. **Editing & Deleting**: click a row to modify the source/target word or toggle layout switching; click its trash button to delete the entry. Use the search field to find source or target words
+
+<p align="center">
+  <img src="screenshots/ezSwitch-words.png" alt="Word substitution settings with search and a configurable remember shortcut" width="900">
+</p>
 
 ## Architecture
 
