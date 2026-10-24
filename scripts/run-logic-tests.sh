@@ -28,6 +28,7 @@ swiftc -O \
     -module-cache-path "$TESTS_DIR/module-cache" \
     EzSwitch/AppLanguage.swift \
     EzSwitch/AppConfigs.swift \
+    EzSwitch/AccessibilityTextSelection.swift \
     EzSwitch/AppLocalization.swift \
     EzSwitch/PopoverBackgroundView.swift \
     EzSwitch/Constants.swift \

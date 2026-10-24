@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import ApplicationServices
 
 // Standalone harness for mapping, matching, hotkey, and picker logic.
 // The app has no XCTest target; run the wrapper to compile these sources
@@ -665,6 +666,21 @@ func testTerminalInput() {
     }
 }
 
+func testAccessibilitySelection() {
+    let element = AXUIElementCreateApplication(getpid())
+    let selection = AccessibilityTextSelection(element: element, text: "ghbdtn", range: CFRange(location: 2, length: 6))
+    check(selection.matches(selection), "unchanged modal selection may be replaced")
+    check(!selection.matches(AccessibilityTextSelection(element: AXUIElementCreateApplication(0), text: selection.text, range: selection.range)),
+          "changed focus cancels modal replacement")
+    check(!selection.matches(AccessibilityTextSelection(element: element, text: "руддщ", range: selection.range)),
+          "edited text cancels modal replacement")
+    check(!selection.matches(AccessibilityTextSelection(element: element, text: selection.text, range: CFRange(location: 10, length: 6))),
+          "moving selection to an identical word cancels modal replacement")
+    check(!selection.matches(AccessibilityTextSelection(element: element, text: selection.text, range: CFRange(location: 2, length: 7))),
+          "changed selection length cancels modal replacement")
+}
+
+testAccessibilitySelection()
 testPopoverBackground()
 testTerminalInput()
 testAppLanguagePreference()

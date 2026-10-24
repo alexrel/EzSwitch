@@ -22,6 +22,7 @@ final class TextTransformer {
     /// the event tap lives on the main run loop, so blocking main delays
     /// delivery of every real keystroke the user types meanwhile.
     private let workQueue = CGEventSynthesizer.workQueue
+    private var accessibilitySelection: AccessibilityTextSelection?
 
     /// Main entry point: tries Branch A (selection), falls back to Branch B (last word)
     ///
@@ -73,6 +74,7 @@ final class TextTransformer {
     /// Runs the actual transform flow on `workQueue`.
     private func runTransform(currentLayout: String, previousLayout: String,
                               snapshot: TransformSnapshot, skipLayoutSwitch: Bool) {
+        defer { accessibilitySelection = nil }
         // Save full clipboard state (including images, files, etc.)
         let clipboard = ClipboardManager.shared
         let savedState = clipboard.saveState()
@@ -100,19 +102,23 @@ final class TextTransformer {
     /// sends Cmd+C, then polls until the clipboard holds something other than
     /// the marker. Callers rely on the selection still being active afterwards.
     ///
-    /// Branch A and Branch B use the same mechanism with different timeouts,
-    /// so this is the single place that implements the round-trip.
+    /// Modal fields without Copy/Paste shortcuts fall back to Accessibility.
     private func copySelection(timeoutMs: Int) -> String? {
+        accessibilitySelection = nil
         let clipboard = ClipboardManager.shared
         let (marker, markerCount) = clipboard.setMarker()
 
         simulateCmdKey(keyCode: UInt16(Constants.KeyCode.c)) // Cmd+C
         usleep(keySequenceDelayUs)
 
-        return clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: timeoutMs)
+        if let copied = clipboard.waitForChange(marker: marker, markerCount: markerCount, timeoutMs: timeoutMs) {
+            return copied
+        }
+        accessibilitySelection = AccessibilityTextSelection.focused()
+        return accessibilitySelection?.text
     }
 
-    /// Attempts to copy selected text using Cmd+C
+    /// Reads selected text through Copy or Accessibility.
     private func tryGetSelectedText() -> String? {
         guard let copied = copySelection(timeoutMs: copyTimeoutMs) else {
             Log.transform.debug("Branch A: nothing copied — no selection")
@@ -132,14 +138,7 @@ final class TextTransformer {
         let transformed = plan.transformedText
         Log.transform.debug("Branch A: \"\(String(selectedText.prefix(30)), privacy: .public)\" → \"\(String(transformed.prefix(30)), privacy: .public)\"")
 
-        // Put transformed text to clipboard and paste (single Undo action)
-        ClipboardManager.shared.setString(transformed)
-        let pasteCount = NSPasteboard.general.changeCount
-        usleep(keySequenceDelayUs)
-
-        // Paste replaces selection automatically
-        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
-        usleep(pasteSettleUs)
+        guard pasteReplacement(transformed, savedState: savedState) else { return }
 
         // Switch layout if enabled (based on plan.targetLayout)
         // Skip if modifier key was held during double-tap
@@ -151,11 +150,6 @@ final class TextTransformer {
             }
         } else if skipLayoutSwitch {
             Log.transform.debug("Branch A: layout switch skipped (modifier held)")
-        }
-
-        // Restore clipboard (full state including images, files, etc.)
-        DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            ClipboardManager.shared.restoreState(savedState, ifUnchangedSince: pasteCount)
         }
     }
 
@@ -191,7 +185,7 @@ final class TextTransformer {
         Log.transform.debug("Branch B word: \"\(parsed.word, privacy: .public)\" (trailing=\(parsed.trailingSpaces.count, privacy: .public), leading=\(parsed.leadingSpaces.count, privacy: .public))")
 
         // If there were leading spaces, shrink selection to exclude them
-        if !parsed.leadingSpaces.isEmpty {
+        if accessibilitySelection == nil && !parsed.leadingSpaces.isEmpty {
             for _ in parsed.leadingSpaces {
                 sendShiftRight()
                 usleep(Constants.Timing.betweenCharsDelayUs)
@@ -202,16 +196,10 @@ final class TextTransformer {
         // Transform and paste (supporting multi-language cycle)
         let plan = planTransform(for: parsed.word, currentLayout: currentLayout, previousLayout: previousLayout, snapshot: snapshot)
         let transformedWord = plan.transformedText
-        let replacement = transformedWord + parsed.trailingSpaces
+        let replacement = (accessibilitySelection == nil ? "" : parsed.leadingSpaces) + transformedWord + parsed.trailingSpaces
         Log.transform.debug("Branch B: \"\(parsed.word, privacy: .public)\" → \"\(transformedWord, privacy: .public)\"")
 
-        // Put to clipboard and paste (single Undo)
-        ClipboardManager.shared.setString(replacement)
-        let pasteCount = NSPasteboard.general.changeCount
-        usleep(keySequenceDelayUs)
-
-        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v)) // Cmd+V
-        usleep(pasteSettleUs)
+        guard pasteReplacement(replacement, savedState: savedState) else { return }
 
         // Switch layout if enabled (based on plan.targetLayout)
         // Skip if modifier key was held during double-tap
@@ -223,11 +211,28 @@ final class TextTransformer {
         } else if skipLayoutSwitch {
             Log.transform.debug("Branch B: layout switch skipped (modifier held)")
         }
+    }
 
-        // Restore clipboard (full state including images, files, etc.)
-        DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            ClipboardManager.shared.restoreState(savedState, ifUnchangedSince: pasteCount)
+    private func pasteReplacement(_ text: String, savedState: ClipboardManager.ClipboardState) -> Bool {
+        let clipboard = ClipboardManager.shared
+        if let selection = accessibilitySelection {
+            let replaced = selection.replace(with: text)
+            clipboard.restoreState(savedState)
+            if !replaced {
+                activeCycle = nil
+                Log.transform.debug("Accessibility replacement failed or selection changed")
+            }
+            return replaced
         }
+        clipboard.setString(text)
+        let pasteCount = NSPasteboard.general.changeCount
+        usleep(keySequenceDelayUs)
+        simulateCmdKey(keyCode: UInt16(Constants.KeyCode.v))
+        usleep(pasteSettleUs)
+        DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
+            clipboard.restoreState(savedState, ifUnchangedSince: pasteCount)
+        }
+        return true
     }
 
     /// Tries to select word backward using app-specific method from AppConfigRegistry

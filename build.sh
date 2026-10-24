@@ -28,7 +28,7 @@ SCHEME="EzSwitch"
 # (the Info.plist only references it via $(MARKETING_VERSION); unless overridden via VERSION=...)
 if [ -z "${VERSION:-}" ]; then
     VERSION=$(grep -m1 'MARKETING_VERSION' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*MARKETING_VERSION = //;s/;//' || echo "")
-    VERSION="${VERSION:-1.1.0}"
+    VERSION="${VERSION:-1.1.1}"
 fi
 BUNDLE_ID=$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*PRODUCT_BUNDLE_IDENTIFIER = //;s/;//')
 BUNDLE_ID="${BUNDLE_ID:-alexrel.EzSwitch}"
