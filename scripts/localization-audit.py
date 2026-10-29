@@ -6,10 +6,8 @@ import sys
 import unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CATS = {"en": "EzSwitch/en.lproj/Localizable.strings",
-        "ru": "EzSwitch/ru.lproj/Localizable.strings",
-        "uk": "EzSwitch/uk.lproj/Localizable.strings",
-        "he": "EzSwitch/he.lproj/Localizable.strings"}
+CATS = {code: f"EzSwitch/{code}.lproj/Localizable.strings"
+        for code in ("en", "ru", "uk", "he", "de", "fr", "es", "pl")}
 
 # Every construct that yields a localization lookup.
 PATTERNS = {

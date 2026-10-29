@@ -29,4 +29,4 @@ Oversized menu bar popovers containing every setting, decorative colored cards, 
 
 ## Accessibility & Inclusion
 
-Use native controls, system typography, semantic colors, keyboard navigation, and readable permission states. Support English, Russian, Ukrainian, and Hebrew; physical keyboard diagrams retain their left-to-right arrangement.
+Use native controls, system typography, semantic colors, keyboard navigation, and readable permission states. Support English, Russian, Ukrainian, Hebrew, German, French, Spanish, and Polish; physical keyboard diagrams retain their left-to-right arrangement.

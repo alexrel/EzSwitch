@@ -20,9 +20,7 @@ cat > "$TESTS_DIR/LocalizationTests.bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 </dict></plist>
 PLIST
-for language in en ru uk he; do
-    cp -R "EzSwitch/$language.lproj" "$TEST_RESOURCES/"
-done
+cp -R EzSwitch/*.lproj "$TEST_RESOURCES/"
 
 swiftc -O \
     -module-cache-path "$TESTS_DIR/module-cache" \

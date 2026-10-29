@@ -325,7 +325,7 @@ func testPresetDisplayNames() {
     let oldName = "Русская — ПК ↔ ABC (auto)"
     var automatic = LayoutMapperPreset(name: oldName, fromLayout: ru, toLayout: abc, mapping: ["й": "q"])
     equal(automatic.resolvedNameStyle, .automatic, "legacy generated title is recognized by its exact pair")
-    for language in [AppLanguage.en, .he, .ru, .uk, .en] {
+    for language in [AppLanguage.en, .he, .ru, .uk, .de, .fr, .es, .pl, .en] {
         localization.apply(language)
         let expected = "\(LayoutRegistry.displayName(forID: ru)) ↔ \(LayoutRegistry.displayName(forID: abc))"
         // Foundation isolates interpolated layout labels in RTL strings.
@@ -497,6 +497,11 @@ func testAppLanguagePreference() {
     defer { defaults.removePersistentDomain(forName: suite) }
 
     equal(AppLanguage.stored(in: defaults), .system, "interface follows system by default")
+    for language in AppLanguage.allCases where language != .system {
+        language.save(in: defaults)
+        equal(AppLanguage.stored(in: defaults), language, "\(language) selection persists")
+        equal(defaults.stringArray(forKey: "AppleLanguages"), [language.rawValue], "\(language) override survives relaunch")
+    }
     AppLanguage.he.save(in: defaults)
     equal(AppLanguage.stored(in: defaults), .he, "Hebrew language selection persists")
     equal(defaults.stringArray(forKey: "AppleLanguages"), ["he"], "language override is available at next launch")
@@ -554,8 +559,25 @@ func testLiveLocalization() {
     localization.apply(.ru)
     equal(changes, ["ru", "uk", "he", "en", "uk", "he", "ru"], "only actual language changes publish a UI update")
 
-    equal(AppLocalization.resolve(.system, systemLanguages: ["fr-FR", "uk-UA"]), "uk", "supported secondary system language is preferred")
-    equal(AppLocalization.resolve(.system, systemLanguages: ["fr-FR"]), "en", "unsupported language falls back to English")
+    let addedLanguages: [(AppLanguage, String, String, String, String)] = [
+        (.de, "de-AT", "Allgemein", "„My preset“ löschen", "Alle 7 Tastenzuordnungen in „My preset“ werden geleert."),
+        (.fr, "fr-CA", "Général", "Supprimer « My preset »", "Les 7 correspondances de touches de « My preset » seront effacées."),
+        (.es, "es-MX", "General", "Eliminar «My preset»", "Se vaciarán las 7 asignaciones de teclas de «My preset»."),
+        (.pl, "pl-PL", "Ogólne", "Usuń „My preset”", "Wszystkie przypisania klawiszy (7) w „My preset” zostaną wyczyszczone.")
+    ]
+    for (language, regionalCode, general, delete, clear) in addedLanguages {
+        localization.apply(language)
+        equal(localization.string("General"), general, "\(language) applies without restarting")
+        equal(localization.string("Delete “\(name)”"), delete, "\(language) preserves interpolated names")
+        equal(localization.string("This will clear all \(count) mapped keys in “\(name)”."), clear,
+              "\(language) preserves integer and string interpolation")
+        check(!localization.isRightToLeft, "\(language) uses LTR")
+        equal(AppLocalization.resolve(.system, systemLanguages: [regionalCode, "en-US"]), language.rawValue,
+              "\(regionalCode) selects the supported base language")
+    }
+
+    equal(AppLocalization.resolve(.system, systemLanguages: ["ja-JP", "uk-UA"]), "uk", "supported secondary system language is preferred")
+    equal(AppLocalization.resolve(.system, systemLanguages: ["ja-JP"]), "en", "unsupported language falls back to English")
     equal(AppLocalization.resolve(.system, systemLanguages: []), "en", "empty system preferences fall back to English")
     equal(AppLocalization.resolve(.en, systemLanguages: ["he-IL"]), "en", "explicit choice ignores system preferences")
 }

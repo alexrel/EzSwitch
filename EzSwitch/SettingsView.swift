@@ -290,7 +290,7 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.1"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
     }
     private var appBuild: String {
         Bundle.main.infoDictionary?["GitCommitHash"] as? String ?? "dev"

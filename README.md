@@ -14,7 +14,7 @@ A macOS menu bar app for switching keyboard layouts, correcting text typed in th
 - **Custom mappings:** generate conversion rules from installed keyboard layouts or edit individual characters and text rules.
 - **Terminal support:** correct newly typed text in Terminal.app and iTerm2, including compatible CLI prompts.
 
-Requires **macOS 14 or later**. Release downloads support **Apple Silicon and Intel** Macs. The interface is available in English, Russian, Ukrainian, and Hebrew.
+Requires **macOS 14 or later**. Release downloads support **Apple Silicon and Intel** Macs. The interface is available in English, Russian, Ukrainian, Hebrew, German, French, Spanish, and Polish.
 
 ## Installation
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// Interface language is independent of keyboard input sources.
 enum AppLanguage: String, CaseIterable, Identifiable {
-    case system, en, ru, uk, he
+    case system, en, ru, uk, he, de, fr, es, pl
 
     var id: String { rawValue }
 
@@ -13,6 +13,10 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .ru: return "Русский"
         case .uk: return "Українська"
         case .he: return "עברית"
+        case .de: return "Deutsch"
+        case .fr: return "Français"
+        case .es: return "Español"
+        case .pl: return "Polski"
         }
     }
 

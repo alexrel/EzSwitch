@@ -28,7 +28,7 @@ SCHEME="EzSwitch"
 # (the Info.plist only references it via $(MARKETING_VERSION); unless overridden via VERSION=...)
 if [ -z "${VERSION:-}" ]; then
     VERSION=$(grep -m1 'MARKETING_VERSION' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*MARKETING_VERSION = //;s/;//' || echo "")
-    VERSION="${VERSION:-1.1.1}"
+    VERSION="${VERSION:-1.2.0}"
 fi
 BUNDLE_ID=$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER' EzSwitch.xcodeproj/project.pbxproj | sed 's/.*PRODUCT_BUNDLE_IDENTIFIER = //;s/;//')
 BUNDLE_ID="${BUNDLE_ID:-alexrel.EzSwitch}"
@@ -172,10 +172,7 @@ build_app() {
             /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" \
                 "$EXPORT_DIR/$APP_NAME.app/Contents/Info.plist"
         fi
-        cp -R "EzSwitch/en.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
-        cp -R "EzSwitch/ru.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
-        cp -R "EzSwitch/he.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
-        cp -R "EzSwitch/uk.lproj" "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
+        cp -R EzSwitch/*.lproj "$EXPORT_DIR/$APP_NAME.app/Contents/Resources/"
         swiftc \
             -module-cache-path "$DERIVED_DATA/ModuleCache.noindex" \
             -sdk "$(xcrun --show-sdk-path)" \
