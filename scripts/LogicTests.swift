@@ -686,6 +686,15 @@ func testTerminalInput() {
     for unsafe in ["", "git\n", "git\r", "git\t", "git\u{1B}[A", "git\u{7F}", "git\u{2028}"] {
         check(!TerminalInput.isSafeReplacement(unsafe), "mapping cannot introduce terminal control input")
     }
+    let split = SelectedWord.split("hello e;by  ")
+    equal([split.leading, split.word, split.trailing], ["hello ", "e;by", "  "], "punctuation stays inside the selected word")
+    equal(SelectedWord.split("prev\n[jhtr").word, "[jhtr", "a line break ends the selected word")
+    check(SelectedWord.split("e;by").leading.isEmpty, "a word at the field start has nothing to trim")
+    check(AppConfigRegistry.looksLikeLineCopy("еуые\n"), "an editor line copy ends in one line break")
+    check(!AppConfigRegistry.looksLikeLineCopy("еуые"), "a selected word is not a line copy")
+    check(!AppConfigRegistry.looksLikeLineCopy("a\nb\n"), "a multi-line selection is not a line copy")
+    check(AppConfigRegistry.shared.copiesLineWithoutSelection(bundleID: "ai.opencode.desktop"), "OpenCode copies the line without a selection")
+    check(!AppConfigRegistry.shared.copiesLineWithoutSelection(bundleID: "com.apple.TextEdit"), "TextEdit copies only selections")
 }
 
 func testAccessibilitySelection() {

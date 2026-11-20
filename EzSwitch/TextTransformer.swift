@@ -79,8 +79,15 @@ final class TextTransformer {
         let clipboard = ClipboardManager.shared
         let savedState = clipboard.saveState()
 
-        // Branch A: Try to detect and transform selected text
-        if let selectedText = tryGetSelectedText() {
+        // Branch A: Try to detect and transform selected text.
+        // Code editors copy the whole line without a selection, so ask Accessibility first.
+        let app = NSWorkspace.shared.frontmostApplication
+        let selectionLength = app.flatMap { AccessibilityTextSelection.focusedSelectionLength(pid: $0.processIdentifier) }
+        Log.transform.debug("Accessibility selection length: \(selectionLength.map(String.init) ?? "unknown", privacy: .public)")
+        if selectionLength != 0, let selectedText = tryGetSelectedText(),
+           !(selectionLength == nil && accessibilitySelection == nil &&
+             AppConfigRegistry.shared.copiesLineWithoutSelection(bundleID: app?.bundleIdentifier) &&
+             AppConfigRegistry.looksLikeLineCopy(selectedText)) {
             completeBranchA(selectedText: selectedText, savedState: savedState,
                             currentLayout: currentLayout, previousLayout: previousLayout,
                             snapshot: snapshot,
@@ -173,7 +180,7 @@ final class TextTransformer {
         }
 
         // Parse selection - extract word and trailing spaces
-        let parsed = parseWordSelection(rawSelection)
+        let parsed = SelectedWord.split(rawSelection)
 
         guard !parsed.word.isEmpty else {
             Log.transform.debug("Branch B: selection \"\(rawSelection, privacy: .public)\" has no word to transform")
@@ -182,11 +189,11 @@ final class TextTransformer {
             return
         }
 
-        Log.transform.debug("Branch B word: \"\(parsed.word, privacy: .public)\" (trailing=\(parsed.trailingSpaces.count, privacy: .public), leading=\(parsed.leadingSpaces.count, privacy: .public))")
+        Log.transform.debug("Branch B word: \"\(parsed.word, privacy: .public)\" (trailing=\(parsed.trailing.count, privacy: .public), leading=\(parsed.leading.count, privacy: .public))")
 
-        // If there were leading spaces, shrink selection to exclude them
-        if accessibilitySelection == nil && !parsed.leadingSpaces.isEmpty {
-            for _ in parsed.leadingSpaces {
+        // Shrink the selection to exclude the text before the word
+        if accessibilitySelection == nil && !parsed.leading.isEmpty {
+            for _ in parsed.leading {
                 sendShiftRight()
                 usleep(Constants.Timing.betweenCharsDelayUs)
             }
@@ -196,7 +203,7 @@ final class TextTransformer {
         // Transform and paste (supporting multi-language cycle)
         let plan = planTransform(for: parsed.word, currentLayout: currentLayout, previousLayout: previousLayout, snapshot: snapshot)
         let transformedWord = plan.transformedText
-        let replacement = (accessibilitySelection == nil ? "" : parsed.leadingSpaces) + transformedWord + parsed.trailingSpaces
+        let replacement = (accessibilitySelection == nil ? "" : parsed.leading) + transformedWord + parsed.trailing
         Log.transform.debug("Branch B: \"\(parsed.word, privacy: .public)\" → \"\(transformedWord, privacy: .public)\"")
 
         guard pasteReplacement(replacement, savedState: savedState) else { return }
@@ -268,6 +275,8 @@ final class TextTransformer {
     /// Handles cases like "cfvb[" where [ is treated as word boundary
     private func trySelectWithOptionShift() -> (String, String)? {
         var fullSelection = ""
+        var previousSelection = ""
+        var presses = 0
         let maxIterations = Constants.WordSelection.maxIterations // Safety limit
 
         for iteration in 0..<maxIterations {
@@ -284,33 +293,30 @@ final class TextTransformer {
                 break
             }
 
-            // Check if selection grew or this is first iteration
-            if iteration == 0 {
-                fullSelection = selection
-            } else if selection.count > fullSelection.count {
-                fullSelection = selection
-            } else {
-                // Selection didn't grow, we're done
+            // Selection didn't grow: start of the field.
+            if iteration > 0 && selection.count <= fullSelection.count { break }
+            previousSelection = fullSelection
+            fullSelection = selection
+            presses = iteration + 1
+
+            // macOS stops at punctuation ("e;by" selects "by"), so extend until whitespace precedes the word.
+            if !SelectedWord.split(selection).leading.isEmpty || selection.count > Constants.WordSelection.maxWordLength {
                 break
             }
-
-            // If selection ends with space or newline, we have the full word
-            if selection.first == " " || selection.first == "\n" || selection.first == "\t" {
-                break
-            }
-
-            // If we got a reasonable word (has letters), check if we should continue
-            let trimmed = selection.trimmingCharacters(in: .whitespaces)
-            if trimmed.count > 1 && (trimmed.first?.isLetter == true || trimmed.first?.isNumber == true) {
-                // Got a word starting with letter/number, probably done
-                break
-            }
-
-            // Selection is just punctuation/symbols, continue selecting
             Log.transform.debug("Extending selection, iteration \(iteration + 1, privacy: .public): \"\(selection, privacy: .public)\"")
         }
 
-        if isValidWordSelection(fullSelection) {
+        // The last press reached the previous word: collapse and replay one press fewer,
+        // instead of walking the caret back letter by letter.
+        if presses > 1, accessibilitySelection == nil, !SelectedWord.split(fullSelection).leading.isEmpty {
+            sendKeyPress(keyCode: UInt16(Constants.KeyCode.rightArrow))
+            for _ in 1..<presses { sendOptionShiftLeft() }
+            usleep(keySequenceDelayUs)
+            fullSelection = previousSelection
+        }
+
+        let parsed = SelectedWord.split(fullSelection)
+        if isValidWordSelection(parsed.word + parsed.trailing) {
             Log.transform.debug("Option+Shift+Left selected: \"\(fullSelection, privacy: .public)\"")
             return (fullSelection, "option")
         } else {
@@ -357,40 +363,6 @@ final class TextTransformer {
             return false
         }
         return true
-    }
-
-    /// Parses word selection to extract: leading spaces, word, trailing spaces
-    private func parseWordSelection(_ text: String) -> (leadingSpaces: String, word: String, trailingSpaces: String) {
-        var leading = ""
-        var word = ""
-        var trailing = ""
-
-        var state = 0 // 0 = collecting leading, 1 = collecting word, 2 = collecting trailing
-
-        for char in text {
-            switch state {
-            case 0:
-                if char == " " || char == "\t" {
-                    leading.append(char)
-                } else {
-                    word.append(char)
-                    state = 1
-                }
-            case 1:
-                if char == " " || char == "\t" {
-                    trailing.append(char)
-                    state = 2
-                } else {
-                    word.append(char)
-                }
-            case 2:
-                trailing.append(char)
-            default:
-                break
-            }
-        }
-
-        return (leading, word, trailing)
     }
 
     /// Sends Ctrl+Shift+Left Arrow (select word backward - works in IDEs)

@@ -301,6 +301,16 @@ final class AppConfigRegistry {
         return NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
+    /// Code editors copy the current line on Cmd+C when nothing is selected.
+    func copiesLineWithoutSelection(bundleID: String?) -> Bool {
+        wordSelectionMethod(for: bundleID) == .ctrlShiftLeft || bundleID?.lowercased().contains("opencode") == true
+    }
+
+    /// A line copy is one line ending in a line break; a selected word has none.
+    static func looksLikeLineCopy(_ text: String) -> Bool {
+        text.last?.isNewline == true && !text.dropLast().contains(where: \.isNewline)
+    }
+
     static func isTerminal(bundleID: String?) -> Bool {
         switch bundleID?.lowercased() {
         case "com.apple.terminal", "com.googlecode.iterm2": return true

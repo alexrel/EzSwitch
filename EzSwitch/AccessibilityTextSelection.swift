@@ -26,6 +26,29 @@ struct AccessibilityTextSelection {
         return AccessibilityTextSelection(element: element, text: text, range: range)
     }
 
+    private static var manualAccessibilityPIDs: Set<pid_t> = []
+
+    /// Selection length in the app's focused field, or nil when the app does not expose it.
+    /// Call from one serial queue only.
+    static func focusedSelectionLength(pid: pid_t) -> Int? {
+        let app = AXUIElementCreateApplication(pid)
+        var focused: CFTypeRef?
+        var result = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused)
+        if result != .success, manualAccessibilityPIDs.insert(pid).inserted {
+            // Electron builds its accessibility tree only when asked.
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            usleep(50_000)
+            result = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused)
+        }
+        var range: CFTypeRef?
+        var value = CFRange()
+        guard result == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID(),
+              AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextRangeAttribute as CFString, &range) == .success,
+              let range, CFGetTypeID(range) == AXValueGetTypeID(),
+              AXValueGetValue(range as! AXValue, .cfRange, &value) else { return nil }
+        return value.length
+    }
+
     func replace(with replacement: String) -> Bool {
         guard let current = Self.focused(), matches(current) else { return false }
         return AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString,

@@ -40,6 +40,17 @@ struct TypedWordBuffer {
     }
 }
 
+enum SelectedWord {
+    /// Splits a backward selection into the text before the last word, the word, and trailing whitespace.
+    /// Punctuation stays in the word: it can be a letter in the other layout ("e;by" → "ужин").
+    static func split(_ text: String) -> (leading: String, word: String, trailing: String) {
+        let bodyEnd = text.lastIndex(where: { !$0.isWhitespace }).map(text.index(after:)) ?? text.startIndex
+        let body = text[..<bodyEnd]
+        let wordStart = body.lastIndex(where: \.isWhitespace).map(body.index(after:)) ?? body.startIndex
+        return (String(body[..<wordStart]), String(body[wordStart...]), String(text[bodyEnd...]))
+    }
+}
+
 enum TerminalInput {
     static func replaysSeparator(_ separator: String) -> Bool {
         separator == "\r" || separator == "\n" || separator == "\t"
